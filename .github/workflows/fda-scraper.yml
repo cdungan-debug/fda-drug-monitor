@@ -1,10 +1,9 @@
 name: FDA Daily Drug Approval Scraper
 
-# Run every day at 12:00 PM UTC (8:00 AM EST)  
 on:  
   schedule:  
-    - cron: '0 12 * * 1-5'  # Monday through Friday at 8am EST  
-  workflow_dispatch:  # Allows manual trigger for testing
+    - cron: '0 12 * * 1-5'  
+  workflow_dispatch:
 
 jobs:  
   scrape-fda:  
@@ -29,9 +28,16 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}  
         run: python fda_scraper.py
 
-      - name: Upload results  
+      - name: Upload JSON results  
         uses: actions/upload-artifact@v4  
         with:  
           name: fda-results-${{ github.run_number }}  
           path: fda_results.json  
+          retention-days: 30
+
+      - name: Upload HTML report  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: fda-report-${{ github.run_number }}  
+          path: fda_report.html  
           retention-days: 30  
