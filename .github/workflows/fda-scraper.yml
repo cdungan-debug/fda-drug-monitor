@@ -1,0 +1,37 @@
+name: FDA Daily Drug Approval Scraper
+
+# Run every day at 12:00 PM UTC (8:00 AM EST)  
+on:  
+  schedule:  
+    - cron: '0 12 * * 1-5'  # Monday through Friday at 8am EST  
+  workflow_dispatch:  # Allows manual trigger for testing
+
+jobs:  
+  scrape-fda:  
+    runs-on: ubuntu-latest
+
+    steps:  
+      - name: Checkout repository  
+        uses: actions/checkout@v4
+
+      - name: Set up Python  
+        uses: actions/setup-python@v5  
+        with:  
+          python-version: '3.12'
+
+      - name: Install dependencies  
+        run: pip install requests
+
+      - name: Run FDA Scraper  
+        env:  
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}  
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}  
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}  
+        run: python fda_scraper.py
+
+      - name: Upload results  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: fda-results-${{ github.run_number }}  
+          path: fda_results.json  
+          retention-days: 30  
