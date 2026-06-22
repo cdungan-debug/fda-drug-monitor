@@ -1,0 +1,27 @@
+name: Physician Graph Analysis
+
+on:  
+  workflow_dispatch:
+
+jobs:  
+  analyze:  
+    runs-on: ubuntu-latest
+
+    steps:  
+      - name: Checkout repository  
+        uses: actions/checkout@v4
+
+      - name: Set up Python  
+        uses: actions/setup-python@v5  
+        with:  
+          python-version: '3.12'
+
+      - name: Run Graph Analysis  
+        run: python physician_graph.py
+
+      - name: Upload results  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: graph-analysis-${{ github.run_number }}  
+          path: graph_analysis_results.json  
+          retention-days: 30  
