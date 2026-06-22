@@ -5,25 +5,18 @@ Unified pipeline that:
 1. Fetches new FDA drug approvals (real data from openFDA API)  
 2. Maps drug indications to medical specialties  
 3. Finds matching Northwell physicians (real data from FAD API)  
-4. Ranks physicians by relationship relevance using graph algorithms  
-5. Generates a report for Maddie with contact links
-
-APIs used:  
-- openFDA Drug Approvals: api.fda.gov/drug/drugsfda.json  
-- openFDA Drug Labels: api.fda.gov/drug/label.json  
-- Northwell FAD API: fadapi.northwell.io/v3/providers  
+4. Ranks physicians by relationship relevance  
+5. Generates a report for Maddie with contact links  
 """
 
 import requests  
 import json  
 import smtplib  
-import heapq  
 from email.mime.text import MIMEText  
 from email.mime.multipart import MIMEMultipart  
 from datetime import datetime, timedelta  
 from collections import defaultdict  
 import os  
-import re  
 import time
 
 
@@ -87,7 +80,7 @@ def fetch_fda_approvals(days_back=7):
         response = requests.get(url, timeout=30)
 
         if response.status_code == 404:  
-            print("No new drug approvals found for this date range.")  
+            print("No new drug approvals found.")  
             return [], date_from, date_to
 
         response.raise_for_status()  
@@ -111,19 +104,14 @@ def fetch_fda_approvals(days_back=7):
                 sub_date = sub.get("submission_status_date", "")  
                 sub_status = sub.get("submission_status", "")
 
-                if not sub_date:  
+                if not sub_date or sub_status != "AP":  
                     continue
 
                 try:  
                     sub_date_int = int(sub_date)  
-                    date_from_int = int(date_from)  
-                    date_to_int = int(date_to)  
-                    if not (date_from_int <= sub_date_int <= date_to_int):  
+                    if not (int(date_from) <= sub_date_int <= int(date_to)):  
                         continue  
                 except (ValueError, TypeError):  
-                    continue
-
-                if sub_status != "AP":  
                     continue
 
                 unique_key = f"{application_number}_{sub_date}"  
@@ -137,16 +125,10 @@ def fetch_fda_approvals(days_back=7):
                 active_ingredients = []
 
                 if products:  
-                    drug_name = products[0].get(  
-                        "brand_name", "Unknown"  
-                    )  
-                    dosage_form = products[0].get(  
-                        "dosage_form", "Unknown"  
-                    )  
+                    drug_name = products[0].get("brand_name", "Unknown")  
+                    dosage_form = products[0].get("dosage_form", "Unknown")  
                     route = products[0].get("route", "Unknown")  
-                    for ai in products[0].get(  
-                        "active_ingredients", []  
-                    ):  
+                    for ai in products[0].get("active_ingredients", []):  
                         active_ingredients.append({  
                             "name": ai.get("name", "Unknown"),  
                             "strength": ai.get("strength", "Unknown")  
@@ -164,7 +146,7 @@ def fetch_fda_approvals(days_back=7):
                     "ABBR": "Abbreviated New Drug Application",  
                 }.get(sub_type, sub_type)
 
-                approval = {  
+                approvals.append({  
                     "drug_name": drug_name,  
                     "generic_name": generic_name,  
                     "approval_date": sub_date,  
@@ -178,9 +160,7 @@ def fetch_fda_approvals(days_back=7):
                     "indication": "",  
                     "matched_specialties": [],  
                     "matched_doctors": [],  
-                }
-
-                approvals.append(approval)
+                })
 
         # Fetch indications  
         print(f"Found {len(approvals)} new approval(s) in date range.")  
@@ -192,8 +172,7 @@ def fetch_fda_approvals(days_back=7):
             if app_num not in fetched_indications:  
                 indication = fetch_drug_indication(app_num)  
                 fetched_indications[app_num] = indication  
-                time.sleep(0.1)  # Rate limiting
-
+                time.sleep(0.1)  
             approval["indication"] = fetched_indications[app_num]
 
         return approvals, date_from, date_to
@@ -207,488 +186,327 @@ def fetch_fda_approvals(days_back=7):
 # SECTION 2: INDICATION TO SPECIALTY MAPPING  
 # ============================================================
 
-# This maps keywords found in drug indications to medical  
-# specialties. This is the "bridge" between FDA data and  
-# doctor data.
-
 INDICATION_SPECIALTY_MAP = {  
     # Cardiology  
-    "hypertension": ["Cardiology", "Internal Medicine"],  
-    "blood pressure": ["Cardiology", "Internal Medicine"],  
+    "hypertension": ["Cardiology"],  
+    "blood pressure": ["Cardiology"],  
     "heart failure": ["Cardiology"],  
     "cardiac": ["Cardiology"],  
     "cardiovascular": ["Cardiology"],  
     "angina": ["Cardiology"],  
     "arrhythmia": ["Cardiology"],  
     "atrial fibrillation": ["Cardiology"],  
-    "anticoagulant": ["Cardiology", "Hematology"],  
-    "thrombin inhibitor": ["Cardiology", "Hematology"],  
-    "pulmonary arterial hypertension": [  
-        "Pulmonology", "Cardiology"  
-    ],
+    "anticoagulant": ["Cardiology"],  
+    "thrombin inhibitor": ["Cardiology"],  
+    "pulmonary arterial hypertension": ["Pulmonology", "Cardiology"],  
+    "endothelin receptor": ["Cardiology", "Pulmonology"],  
+    "losartan": ["Cardiology"],  
+    "angiotensin": ["Cardiology"],  
+    "labetalol": ["Cardiology"],  
+    "propranolol": ["Cardiology"],  
+    "irbesartan": ["Cardiology"],
 
     # Oncology  
     "cancer": ["Oncology"],  
     "tumor": ["Oncology"],  
     "melanoma": ["Oncology", "Dermatology"],  
     "carcinoma": ["Oncology"],  
-    "lymphoma": ["Oncology", "Hematology"],  
-    "leukemia": ["Oncology", "Hematology"],  
+    "lymphoma": ["Oncology"],  
+    "leukemia": ["Oncology"],  
     "neoplasm": ["Oncology"],  
-    "chemotherapy": ["Oncology"],  
     "glioma": ["Oncology", "Neurology"],  
     "metastatic": ["Oncology"],  
-    "myelodysplastic": ["Oncology", "Hematology"],  
-    "nucleoside metabolic inhibitor": ["Oncology"],
+    "myelodysplastic": ["Oncology"],  
+    "nucleoside metabolic inhibitor": ["Oncology"],  
+    "capecitabine": ["Oncology"],  
+    "azacitidine": ["Oncology"],
 
     # Neurology  
     "seizure": ["Neurology"],  
     "epilepsy": ["Neurology"],  
     "neurological": ["Neurology"],  
+    "anticonvulsant": ["Neurology"],  
+    "antiepileptic": ["Neurology"],  
+    "lacosamide": ["Neurology"],  
+    "perampanel": ["Neurology"],  
+    "topiramate": ["Neurology"],  
+    "oxcarbazepine": ["Neurology"],  
+    "levetiracetam": ["Neurology"],
+
+    # Psychiatry  
     "schizophrenia": ["Psychiatry"],  
     "bipolar": ["Psychiatry"],  
     "antipsychotic": ["Psychiatry"],  
-    "autism": ["Psychiatry"],
+    "autism": ["Psychiatry"],  
+    "risperidone": ["Psychiatry"],
 
     # Dermatology  
     "acne": ["Dermatology"],  
     "dermatitis": ["Dermatology"],  
     "psoriasis": ["Dermatology"],  
     "skin": ["Dermatology"],  
-    "topical": ["Dermatology"],  
-    "eczema": ["Dermatology"],
+    "eczema": ["Dermatology"],  
+    "clindamycin": ["Dermatology", "Infectious Disease"],
 
     # Pulmonology  
-    "asthma": ["Pulmonology", "Allergy and Immunology"],  
+    "asthma": ["Pulmonology"],  
     "copd": ["Pulmonology"],  
     "pulmonary": ["Pulmonology"],  
     "respiratory": ["Pulmonology"],  
-    "eosinophilic": ["Pulmonology", "Allergy and Immunology"],
+    "eosinophilic": ["Pulmonology"],  
+    "depemokimab": ["Pulmonology"],
 
     # Rheumatology  
     "arthritis": ["Rheumatology"],  
     "rheumatoid": ["Rheumatology"],  
     "lupus": ["Rheumatology"],  
-    "autoimmune": ["Rheumatology"],
+    "autoimmune": ["Rheumatology"],  
+    "tofacitinib": ["Rheumatology"],  
+    "janus kinase": ["Rheumatology"],
 
     # Ophthalmology  
     "glaucoma": ["Ophthalmology"],  
     "ophthalmic": ["Ophthalmology"],  
     "intraocular": ["Ophthalmology"],  
-    "eye": ["Ophthalmology"],  
     "retinal": ["Ophthalmology"],  
-    "angiography": ["Ophthalmology"],
+    "angiography": ["Ophthalmology"],  
+    "dorzolamide": ["Ophthalmology"],  
+    "fluorescein": ["Ophthalmology"],
 
     # Gastroenterology  
     "hepatorenal": ["Gastroenterology", "Nephrology"],  
-    "liver": ["Gastroenterology", "Hepatology"],  
-    "hepatic": ["Gastroenterology", "Hepatology"],  
+    "liver": ["Gastroenterology"],  
+    "hepatic": ["Gastroenterology"],  
     "gastrointestinal": ["Gastroenterology"],  
     "nausea": ["Gastroenterology"],  
     "vomiting": ["Gastroenterology"],  
-    "antiemetic": ["Gastroenterology", "Oncology"],
+    "antiemetic": ["Gastroenterology", "Oncology"],  
+    "terlipressin": ["Gastroenterology", "Nephrology"],
 
     # Nephrology  
     "renal": ["Nephrology"],  
     "kidney": ["Nephrology"],
 
     # Endocrinology  
-    "osteoporosis": ["Endocrinology", "Rheumatology"],  
+    "osteoporosis": ["Endocrinology"],  
     "diabetes": ["Endocrinology"],  
     "thyroid": ["Endocrinology"],  
     "hormone": ["Endocrinology"],  
-    "estrogen": ["Endocrinology", "Obstetrics and Gynecology"],  
     "estradiol": ["Endocrinology", "Obstetrics and Gynecology"],  
     "menopausal": ["Endocrinology", "Obstetrics and Gynecology"],  
-    "bisphosphonate": ["Endocrinology", "Rheumatology"],
+    "bisphosphonate": ["Endocrinology"],  
+    "risedronate": ["Endocrinology"],  
+    "alendronate": ["Endocrinology"],
 
     # Infectious Disease  
     "antibacterial": ["Infectious Disease"],  
     "antibiotic": ["Infectious Disease"],  
-    "antifungal": ["Infectious Disease"],  
     "antiviral": ["Infectious Disease"],  
     "infection": ["Infectious Disease"],  
     "pneumonia": ["Infectious Disease", "Pulmonology"],  
-    "mrsa": ["Infectious Disease"],  
     "vancomycin": ["Infectious Disease"],  
     "malaria": ["Infectious Disease"],  
-    "herpes": ["Infectious Disease", "Dermatology"],
+    "herpes": ["Infectious Disease"],  
+    "linezolid": ["Infectious Disease"],  
+    "cephalexin": ["Infectious Disease"],  
+    "valacyclovir": ["Infectious Disease"],
 
     # Radiology  
     "contrast": ["Radiology"],  
     "imaging": ["Radiology"],  
-    "gadolinium": ["Radiology"],  
     "gadobutrol": ["Radiology"],  
     "magnetic resonance": ["Radiology"],  
-    "positron emission": ["Radiology", "Nuclear Medicine"],  
-    "prostate-specific membrane antigen": [  
-        "Radiology", "Urology", "Oncology"  
-    ],
+    "gallium": ["Radiology", "Oncology"],
 
     # Anesthesiology  
     "neuromuscular block": ["Anesthesiology"],  
     "succinylcholine": ["Anesthesiology"],  
-    "intubation": ["Anesthesiology"],  
-    "anesthesia": ["Anesthesiology"],
+    "intubation": ["Anesthesiology"],
 
-    # Urology  
-    "prostate": ["Urology", "Oncology"],  
-    "urinary": ["Urology"],
+    # Emergency Medicine  
+    "naloxone": ["Emergency Medicine"],  
+    "opioid overdose": ["Emergency Medicine"],  
+    "opioid antagonist": ["Emergency Medicine"],
 
-    # Hematology  
-    "thrombosis": ["Hematology"],  
-    "coagulation": ["Hematology"],  
-    "platelet": ["Hematology"],  
+    # Obstetrics / Gynecology  
+    "pregnancy": ["Obstetrics and Gynecology"],  
+    "doxylamine": ["Obstetrics and Gynecology"],  
+    "pyridoxine": ["Obstetrics and Gynecology"],
+
+    # Topical/route based  
+    "topical": ["Dermatology"],  
 }
 
 
 def map_indication_to_specialties(indication_text, drug_name="",  
                                    route=""):  
-    """  
-    Map a drug's indication text to relevant medical specialties.
+    """Map drug indication text to relevant medical specialties."""  
+    matched = set()
 
-    This is the KEY BRIDGE between FDA data and doctor data.  
-    Uses keyword matching against the indication text.  
-    """  
-    if not indication_text or indication_text == "Indication not available":  
-        # If no indication, try to guess from drug name and route  
-        return guess_specialty_from_drug_info(drug_name, route)
+    # Check indication text  
+    if indication_text and indication_text != "Indication not available":  
+        indication_lower = indication_text.lower()  
+        for keyword, specs in INDICATION_SPECIALTY_MAP.items():  
+            if keyword.lower() in indication_lower:  
+                for s in specs:  
+                    matched.add(s)
 
-    indication_lower = indication_text.lower()  
-    matched_specialties = set()
+    # Check drug name  
+    if drug_name:  
+        drug_lower = drug_name.lower()  
+        for keyword, specs in INDICATION_SPECIALTY_MAP.items():  
+            if keyword.lower() in drug_lower:  
+                for s in specs:  
+                    matched.add(s)
 
-    for keyword, specialties in INDICATION_SPECIALTY_MAP.items():  
-        if keyword.lower() in indication_lower:  
-            for spec in specialties:  
-                matched_specialties.add(spec)
+    # Route-based fallback  
+    if not matched and route:  
+        route_lower = route.lower()  
+        if "ophthalmic" in route_lower:  
+            matched.add("Ophthalmology")  
+        elif "topical" in route_lower:  
+            matched.add("Dermatology")
 
-    # If nothing matched, try guessing from drug info  
-    if not matched_specialties:  
-        return guess_specialty_from_drug_info(drug_name, route)
+    # Ultimate fallback  
+    if not matched:  
+        matched.add("Internal Medicine")
 
-    return list(matched_specialties)
-
-
-def guess_specialty_from_drug_info(drug_name, route):  
-    """Fallback: guess specialty from drug name and route."""  
-    specialties = set()  
-    drug_lower = drug_name.lower()  
-    route_lower = route.lower() if route else ""
-
-    for keyword, specs in INDICATION_SPECIALTY_MAP.items():  
-        if keyword.lower() in drug_lower:  
-            for spec in specs:  
-                specialties.add(spec)
-
-    # Route-based guessing  
-    if "ophthalmic" in route_lower:  
-        specialties.add("Ophthalmology")  
-    elif "topical" in route_lower:  
-        specialties.add("Dermatology")  
-    elif "intravenous" in route_lower and not specialties:  
-        specialties.add("Internal Medicine")
-
-    if not specialties:  
-        specialties.add("Internal Medicine")
-
-    return list(specialties)
+    return list(matched)
 
 
 # ============================================================  
-# SECTION 3: NORTHWELL PHYSICIAN LOOKUP (REAL DATA)  
+# SECTION 3: NORTHWELL FAD API (REAL DOCTOR DATA)  
 # ============================================================
 
 def fetch_northwell_doctors(specialty, max_results=5):  
     """  
-    Fetch real Northwell Health physicians from the FAD API.
+    Fetch real Northwell doctors from the FAD API.
 
-    This is the SAME API your Chrome extensions use.  
+    Correct endpoint: /v3/providers/search?specialty=X  
+    Response structure confirmed from browser testing.  
     """  
     try:  
         url = (  
             f"https://fadapi.northwell.io/v3/providers/search"  
             f"?specialty={requests.utils.quote(specialty)}"  
-            f"&page=1"  
-            f"&perPage={max_results}"  
-            f"&sort=relevance"  
         )
 
         headers = {  
             "Accept": "application/json",  
-            "User-Agent": "FDA-Drug-Monitor/1.0",  
+            "User-Agent": (  
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "  
+                "AppleWebKit/537.36"  
+            ),  
         }
 
-        print(f"    Searching FAD API for: {specialty}...")  
+        print(f"    Searching FAD API: {specialty}...")  
         response = requests.get(url, headers=headers, timeout=15)
 
         if response.status_code == 200:  
             data = response.json()
 
-            # The FAD API response structure  
-            providers = data.get("providers", data.get("results", []))
+            # FAD API returns: {"code":200, "results":[...]}  
+            results = data.get("results", [])
 
-            if isinstance(data, list):  
-                providers = data
+            if not results and isinstance(data, list):  
+                results = data
 
             doctors = []  
-            for provider in providers[:max_results]:  
-                # Extract doctor info based on FAD API structure  
+            for provider in results[:max_results]:  
+                # Extract name  
+                first = provider.get("firstname", "")  
+                last = provider.get("lastname", "")  
+                degrees = provider.get("degrees", [])  
+                degree_str = ", ".join(degrees) if degrees else ""
+
+                if first and last:  
+                    name = f"Dr. {first} {last}"  
+                    if degree_str:  
+                        name += f", {degree_str}"  
+                else:  
+                    display = provider.get("displayName", "")  
+                    name = display if display else "Unknown"
+
+                # Extract location  
+                city = provider.get("city", "")  
+                state = provider.get("state_abbr",  
+                         provider.get("state", ""))  
+                practice = provider.get("practice_name", "")  
+                address = provider.get("street_address", "")
+
+                if practice and city:  
+                    location = f"{practice}, {city}, {state}"  
+                elif city:  
+                    location = f"{city}, {state}"  
+                else:  
+                    location = "Location not available"
+
+                # Extract phone  
+                phone = provider.get("phone", "")  
+                if isinstance(phone, dict):  
+                    phone = phone.get("formatted", str(phone))
+
+                # Extract profile URL  
+                url_path = provider.get("url", "")  
+                if url_path and not url_path.startswith("http"):  
+                    profile_url = f"https://www.northwell.edu{url_path}"  
+                elif url_path:  
+                    profile_url = url_path  
+                else:  
+                    npi = provider.get("provider_soarian_npi", "")  
+                    profile_url = ""
+
+                # Extract NPI  
+                npi = provider.get(  
+                    "provider_soarian_npi",  
+                    provider.get("npi", "")  
+                )
+
+                # Get department  
+                department = provider.get("department_me", specialty)
+
+                # Build email from name pattern (Northwell format)  
+                # This is a guess - may need adjustment  
+                email = ""
+
                 doctor = {  
-                    "name": extract_doctor_name(provider),  
-                    "specialty": specialty,  
-                    "all_specialties": extract_specialties(provider),  
-                    "location": extract_location(provider),  
-                    "phone": extract_phone(provider),  
-                    "npi": provider.get("npi", ""),  
-                    "profile_url": extract_profile_url(provider),  
-                    "teams_link": "",  # Will be generated  
-                    "email": extract_email(provider),  
+                    "name": name,  
+                    "specialty": department,  
+                    "location": location,  
+                    "address": address,  
+                    "city": city,  
+                    "state": state,  
+                    "phone": str(phone),  
+                    "npi": str(npi),  
+                    "profile_url": profile_url,  
+                    "practice_name": practice,  
+                    "gender": provider.get("gender", ""),  
+                    "teams_link": "",  
+                    "email": email,  
                     "match_type": "DIRECT_SPECIALTY_MATCH",  
                     "relevance_score": 1.0,  
+                    "matched_via": specialty,  
                 }
-
-                # Generate Teams chat link if email available  
-                if doctor["email"]:  
-                    doctor["teams_link"] = (  
-                        f"https://teams.microsoft.com/l/chat/0/0"  
-                        f"?users={doctor['email']}"  
-                    )
 
                 doctors.append(doctor)
 
-            print(f"    Found {len(doctors)} doctor(s)")  
+            print(f"    Found {len(doctors)} doctor(s) for {specialty}")  
             return doctors
 
-        elif response.status_code == 404:  
-            print(f"    No doctors found for {specialty}")  
-            return []  
         else:  
-            print(f"    FAD API returned status {response.status_code}")  
-            # Try alternate endpoint structure  
-            return try_alternate_fad_search(specialty, max_results)
+            print(  
+                f"    FAD API returned status {response.status_code} "  
+                f"for {specialty}"  
+            )  
+            return []
 
     except Exception as e:  
-        print(f"    Error searching FAD API: {e}")  
+        print(f"    Error querying FAD API for {specialty}: {e}")  
         return []
 
 
-def try_alternate_fad_search(specialty, max_results=5):  
-    """Try alternate FAD API endpoint structures."""  
-    alternate_urls = [  
-        (  
-            f"https://fadapi.northwell.io/v3/providers"  
-            f"?specialty={requests.utils.quote(specialty)}"  
-            f"&limit={max_results}"  
-        ),  
-        (  
-            f"https://fadapi.northwell.io/v3/providers/search"  
-            f"?q={requests.utils.quote(specialty)}"  
-            f"&limit={max_results}"  
-        ),  
-    ]
-
-    for url in alternate_urls:  
-        try:  
-            response = requests.get(url, timeout=10)  
-            if response.status_code == 200:  
-                data = response.json()  
-                if data:  
-                    print(f"    Alternate endpoint worked")  
-                    return parse_fad_response(data, specialty, max_results)  
-        except Exception:  
-            continue
-
-    return []
-
-
-def parse_fad_response(data, specialty, max_results):  
-    """Parse FAD API response regardless of structure."""  
-    doctors = []
-
-    # Handle different response structures  
-    if isinstance(data, dict):  
-        providers = (  
-            data.get("providers", [])  
-            or data.get("results", [])  
-            or data.get("data", [])  
-        )  
-    elif isinstance(data, list):  
-        providers = data  
-    else:  
-        return []
-
-    for provider in providers[:max_results]:  
-        doctor = {  
-            "name": extract_doctor_name(provider),  
-            "specialty": specialty,  
-            "all_specialties": extract_specialties(provider),  
-            "location": extract_location(provider),  
-            "phone": extract_phone(provider),  
-            "npi": provider.get("npi", ""),  
-            "profile_url": extract_profile_url(provider),  
-            "teams_link": "",  
-            "email": extract_email(provider),  
-            "match_type": "DIRECT_SPECIALTY_MATCH",  
-            "relevance_score": 1.0,  
-        }
-
-        if doctor["email"]:  
-            doctor["teams_link"] = (  
-                f"https://teams.microsoft.com/l/chat/0/0"  
-                f"?users={doctor['email']}"  
-            )
-
-        doctors.append(doctor)
-
-    return doctors
-
-
-def extract_doctor_name(provider):  
-    """Extract doctor name from various FAD API formats."""  
-    if isinstance(provider, dict):  
-        # Try different name fields  
-        if "displayName" in provider:  
-            return provider["displayName"]  
-        if "name" in provider:  
-            if isinstance(provider["name"], dict):  
-                first = provider["name"].get("first", "")  
-                last = provider["name"].get("last", "")  
-                return f"Dr. {first} {last}".strip()  
-            return provider["name"]  
-        if "firstName" in provider and "lastName" in provider:  
-            return (  
-                f"Dr. {provider['firstName']} "  
-                f"{provider['lastName']}"  
-            )  
-        if "full_name" in provider:  
-            return provider["full_name"]  
-    return "Unknown"
-
-
-def extract_specialties(provider):  
-    """Extract all specialties from provider data."""  
-    if isinstance(provider, dict):  
-        specs = provider.get("specialties", [])  
-        if isinstance(specs, list):  
-            return [  
-                s.get("name", s) if isinstance(s, dict) else str(s)  
-                for s in specs  
-            ]  
-        spec = provider.get("specialty", "")  
-        if spec:  
-            return [spec]  
-    return []
-
-
-def extract_location(provider):  
-    """Extract location from provider data."""  
-    if isinstance(provider, dict):  
-        locations = provider.get("locations", [])  
-        if locations and isinstance(locations, list):  
-            loc = locations[0]  
-            if isinstance(loc, dict):  
-                parts = []  
-                if loc.get("name"):  
-                    parts.append(loc["name"])  
-                if loc.get("city"):  
-                    parts.append(loc["city"])  
-                if loc.get("state"):  
-                    parts.append(loc["state"])  
-                if parts:  
-                    return ", ".join(parts)
-
-        address = provider.get("address", {})  
-        if isinstance(address, dict):  
-            city = address.get("city", "")  
-            state = address.get("state", "")  
-            if city:  
-                return f"{city}, {state}".strip(", ")
-
-        if provider.get("location"):  
-            return provider["location"]
-
-    return "Location not available"
-
-
-def extract_phone(provider):  
-    """Extract phone number from provider data."""  
-    if isinstance(provider, dict):  
-        if provider.get("phone"):  
-            return provider["phone"]  
-        locations = provider.get("locations", [])  
-        if locations and isinstance(locations, list):  
-            loc = locations[0]  
-            if isinstance(loc, dict) and loc.get("phone"):  
-                return loc["phone"]  
-    return ""
-
-
-def extract_email(provider):  
-    """Extract email from provider data."""  
-    if isinstance(provider, dict):  
-        return provider.get("email", "")  
-    return ""
-
-
-def extract_profile_url(provider):  
-    """Extract or construct profile URL."""  
-    if isinstance(provider, dict):  
-        if provider.get("url"):  
-            return provider["url"]  
-        if provider.get("profileUrl"):  
-            return provider["profileUrl"]  
-        slug = provider.get("slug", provider.get("id", ""))  
-        if slug:  
-            return f"https://www.northwell.edu/find-care/find-a-doctor/{slug}"  
-    return ""
-
-
 # ============================================================  
-# SECTION 4: PHYSICIAN RANKING (GRAPH ALGORITHM)  
-# ============================================================
-
-def rank_doctors_for_drug(drug_approval, all_doctors_by_specialty):  
-    """  
-    Rank doctors by relevance to a drug approval using a  
-    simplified graph-based approach.
-
-    Ranking criteria (weighted):  
-    1. Direct specialty match to drug indication (weight: 1.0)  
-    2. Related specialty (weight: 0.6)  
-    3. Same location as a directly matched doctor (weight: 0.3)
-
-    This implements the core insight from Dijkstra's exploration:  
-    closer relationships (shorter paths) = higher relevance.  
-    """  
-    ranked_doctors = []  
-    seen_doctors = set()
-
-    indication = drug_approval.get("indication", "")  
-    primary_specialties = drug_approval.get("matched_specialties", [])
-
-    for specialty in primary_specialties:  
-        doctors = all_doctors_by_specialty.get(specialty, [])  
-        for doctor in doctors:  
-            doc_key = doctor.get("name", "") + doctor.get("npi", "")  
-            if doc_key and doc_key not in seen_doctors:  
-                seen_doctors.add(doc_key)  
-                doctor_copy = doctor.copy()  
-                doctor_copy["match_type"] = "DIRECT_SPECIALTY_MATCH"  
-                doctor_copy["relevance_score"] = 1.0  
-                doctor_copy["matched_via"] = specialty  
-                ranked_doctors.append(doctor_copy)
-
-    # Sort by relevance score (highest first)  
-    ranked_doctors.sort(  
-        key=lambda x: x["relevance_score"],  
-        reverse=True  
-    )
-
-    return ranked_doctors
-
-
-# ============================================================  
-# SECTION 5: REPORT GENERATION  
+# SECTION 4: REPORT GENERATION  
 # ============================================================
 
 def build_email_html(approvals, date_from, date_to):  
@@ -705,8 +523,7 @@ def build_email_html(approvals, date_from, date_to):
         to_display = date_to
 
     total_doctors = sum(  
-        len(a.get("matched_doctors", []))  
-        for a in approvals  
+        len(a.get("matched_doctors", [])) for a in approvals  
     )
 
     html = f"""  
@@ -731,59 +548,50 @@ def build_email_html(approvals, date_from, date_to):
                 background-color: #f0f6ff;  
                 padding: 15px 30px;  
                 border-bottom: 2px solid #0078d4;  
-                display: flex;  
-                gap: 30px;  
             }}  
-            .summary-stat {{  
-                text-align: center;  
+            .summary-stats {{  
+                display: flex; gap: 40px;  
             }}  
-            .summary-stat .number {{  
+            .stat {{ text-align: center; }}  
+            .stat .number {{  
                 font-size: 28px;  
                 font-weight: bold;  
                 color: #0078d4;  
             }}  
-            .summary-stat .label {{  
-                font-size: 12px;  
-                color: #666;  
+            .stat .label {{  
+                font-size: 12px; color: #666;  
             }}  
             .drug-card {{  
                 border: 1px solid #e0e0e0;  
                 border-left: 4px solid #0078d4;  
                 border-radius: 4px;  
                 margin: 20px 30px;  
-                padding: 0;  
                 background: white;  
+                overflow: hidden;  
             }}  
-            .drug-card-header {{  
+            .drug-header {{  
                 background: #f8f9fa;  
                 padding: 15px 20px;  
                 border-bottom: 1px solid #e0e0e0;  
             }}  
-            .drug-card-header h3 {{  
+            .drug-header h3 {{  
                 color: #0078d4;  
-                margin: 0;  
-                font-size: 18px;  
+                margin: 0; font-size: 18px;  
             }}  
-            .drug-card-header .meta {{  
-                color: #666;  
-                font-size: 13px;  
-                margin-top: 4px;  
+            .drug-header .meta {{  
+                color: #666; font-size: 13px; margin-top: 4px;  
             }}  
-            .drug-card-body {{  
-                padding: 15px 20px;  
-            }}  
-            .drug-info-grid {{  
+            .drug-body {{ padding: 15px 20px; }}  
+            .info-grid {{  
                 display: grid;  
                 grid-template-columns: 1fr 1fr;  
-                gap: 8px;  
-                font-size: 14px;  
+                gap: 8px; font-size: 14px;  
             }}  
-            .drug-info-grid .label {{  
-                font-weight: bold;  
-                color: #555;  
+            .info-grid .lbl {{  
+                font-weight: bold; color: #555;  
             }}  
-            .indication-box {{  
-                background-color: #fff3cd;  
+            .indication {{  
+                background: #fff3cd;  
                 border: 1px solid #ffc107;  
                 border-radius: 4px;  
                 padding: 12px 15px;  
@@ -791,65 +599,49 @@ def build_email_html(approvals, date_from, date_to):
                 font-size: 13px;  
                 line-height: 1.5;  
             }}  
-            .doctors-section {{  
+            .doctors {{  
                 margin-top: 15px;  
                 border-top: 1px solid #e0e0e0;  
                 padding-top: 15px;  
             }}  
-            .doctors-section h4 {{  
+            .doctors h4 {{  
                 color: #333;  
                 margin: 0 0 10px 0;  
                 font-size: 15px;  
             }}  
-            .doctor-row {{  
+            .doc-row {{  
                 display: flex;  
                 align-items: center;  
-                padding: 8px 12px;  
+                padding: 10px 12px;  
                 margin: 4px 0;  
                 background: #f8f9fa;  
                 border-radius: 4px;  
-                font-size: 14px;  
+                border-left: 3px solid #28a745;  
             }}  
-            .doctor-row .doc-info {{  
-                flex: 1;  
+            .doc-info {{ flex: 1; }}  
+            .doc-name {{  
+                font-weight: bold; color: #333; font-size: 14px;  
             }}  
-            .doctor-row .doc-name {{  
-                font-weight: bold;  
-                color: #333;  
+            .doc-detail {{  
+                color: #666; font-size: 12px; margin-top: 2px;  
             }}  
-            .doctor-row .doc-detail {{  
-                color: #666;  
-                font-size: 12px;  
-            }}  
-            .doctor-row .doc-actions {{  
-                display: flex;  
-                gap: 8px;  
+            .doc-actions {{  
+                display: flex; gap: 6px;  
             }}  
             .btn {{  
                 display: inline-block;  
                 padding: 5px 12px;  
                 border-radius: 4px;  
                 text-decoration: none;  
-                font-size: 12px;  
+                font-size: 11px;  
                 font-weight: bold;  
-            }}  
-            .btn-teams {{  
-                background: #6264a7;  
                 color: white;  
             }}  
-            .btn-email {{  
-                background: #0078d4;  
-                color: white;  
-            }}  
-            .btn-profile {{  
-                background: #28a745;  
-                color: white;  
-            }}  
-            .no-doctors {{  
-                color: #666;  
-                font-style: italic;  
-                font-size: 13px;  
-                padding: 8px 0;  
+            .btn-profile {{ background: #28a745; }}  
+            .btn-phone {{ background: #6c757d; }}  
+            .no-docs {{  
+                color: #999; font-style: italic;  
+                font-size: 13px; padding: 8px 0;  
             }}  
             .footer {{  
                 padding: 20px 30px;  
@@ -863,182 +655,157 @@ def build_email_html(approvals, date_from, date_to):
     <body>  
         <div class="header">  
             <h1>FDA Daily Drug Approval Report</h1>  
-            <p>Date Range: {from_display} to {to_display}</p>  
+            <p>Northwell Health — Physician Matching Report</p>  
+            <p style="font-size:12px;">  
+                Date Range: {from_display} to {to_display}  
+            </p>  
         </div>  
         <div class="summary">  
-            <div class="summary-stat">  
-                <div class="number">{len(approvals)}</div>  
-                <div class="label">Drug Approvals</div>  
-            </div>  
-            <div class="summary-stat">  
-                <div class="number">{total_doctors}</div>  
-                <div class="label">Matched Doctors</div>  
-            </div>  
-            <div class="summary-stat">  
-                <div class="number">{len(set(  
-                    s for a in approvals  
-                    for s in a.get('matched_specialties', [])  
-                ))}</div>  
-                <div class="label">Specialties</div>  
+            <div class="summary-stats">  
+                <div class="stat">  
+                    <div class="number">{len(approvals)}</div>  
+                    <div class="label">Drug Approvals</div>  
+                </div>  
+                <div class="stat">  
+                    <div class="number">{total_doctors}</div>  
+                    <div class="label">Matched Physicians</div>  
+                </div>  
+                <div class="stat">  
+                    <div class="number">{len(set(  
+                        s for a in approvals  
+                        for s in a.get('matched_specialties', [])  
+                    ))}</div>  
+                    <div class="label">Specialties</div>  
+                </div>  
             </div>  
         </div>  
     """
 
-    if not approvals:  
-        html += """  
-        <div style="padding:40px 30px;text-align:center;color:#666;">  
-            <p>No new drug approvals found for this date range.</p>  
-        </div>  
-        """  
-    else:  
-        for i, a in enumerate(approvals, 1):  
-            ingredients_str = ", ".join(  
-                [f"{ai['name']} ({ai['strength']})"  
-                 for ai in a.get("active_ingredients", [])]  
-            ) or "N/A"
+    for i, a in enumerate(approvals, 1):  
+        ingredients = ", ".join(  
+            [f"{ai['name']} ({ai['strength']})"  
+             for ai in a.get("active_ingredients", [])]  
+        ) or "N/A"
 
-            try:  
-                date_display = datetime.strptime(  
-                    a['approval_date'], "%Y%m%d"  
-                ).strftime("%B %d, %Y")  
-            except (ValueError, TypeError):  
-                date_display = a['approval_date']
+        try:  
+            date_disp = datetime.strptime(  
+                a['approval_date'], "%Y%m%d"  
+            ).strftime("%B %d, %Y")  
+        except (ValueError, TypeError):  
+            date_disp = a['approval_date']
 
-            specialties_str = ", ".join(  
-                a.get("matched_specialties", ["N/A"])  
-            )
+        specs = ", ".join(a.get("matched_specialties", ["N/A"]))
 
-            # Drug card  
-            html += f"""  
-            <div class="drug-card">  
-                <div class="drug-card-header">  
-                    <h3>#{i} — {a['drug_name']}</h3>  
-                    <div class="meta">  
-                        {a['generic_name']} |  
-                        Approved: {date_display} |  
-                        {a['submission_type_description']}  
-                    </div>  
-                </div>  
-                <div class="drug-card-body">  
-                    <div class="drug-info-grid">  
-                        <div>  
-                            <span class="label">Sponsor:</span>  
-                            {a['sponsor']}  
-                        </div>  
-                        <div>  
-                            <span class="label">Application:</span>  
-                            {a['application_number']}  
-                        </div>  
-                        <div>  
-                            <span class="label">Dosage Form:</span>  
-                            {a['dosage_form']}  
-                        </div>  
-                        <div>  
-                            <span class="label">Route:</span>  
-                            {a['route']}  
-                        </div>  
-                        <div>  
-                            <span class="label">Ingredients:</span>  
-                            {ingredients_str}  
-                        </div>  
-                        <div>  
-                            <span class="label">  
-                                Matched Specialties:  
-                            </span>  
-                            {specialties_str}  
-                        </div>  
-                    </div>  
-            """
-
-            # Indication box  
-            indication = a.get('indication', '')  
-            if indication and indication != "Indication not available":  
-                # Truncate for display  
-                indication_display = indication[:400]  
-                if len(indication) > 400:  
-                    indication_display += "..."  
-                html += f"""  
-                    <div class="indication-box">  
-                        <strong>Indication:</strong>  
-                        {indication_display}  
-                    </div>  
-                """
-
-            # Matched doctors section  
-            doctors = a.get("matched_doctors", [])  
-            html += """  
-                    <div class="doctors-section">  
-                        <h4>Matched Northwell Physicians</h4>  
-            """
-
-            if doctors:  
-                for doc in doctors[:10]:  # Show top 10  
-                    teams_btn = ""  
-                    if doc.get("teams_link"):  
-                        teams_btn = (  
-                            f'<a href="{doc["teams_link"]}" '  
-                            f'class="btn btn-teams">Teams Chat</a>'  
-                        )
-
-                    email_btn = ""  
-                    if doc.get("email"):  
-                        email_btn = (  
-                            f'<a href="mailto:{doc["email"]}" '  
-                            f'class="btn btn-email">Email</a>'  
-                        )
-
-                    profile_btn = ""  
-                    if doc.get("profile_url"):  
-                        profile_btn = (  
-                            f'<a href="{doc["profile_url"]}" '  
-                            f'class="btn btn-profile">Profile</a>'  
-                        )
-
-                    html += f"""  
-                        <div class="doctor-row">  
-                            <div class="doc-info">  
-                                <div class="doc-name">  
-                                    {doc.get('name', 'Unknown')}  
-                                </div>  
-                                <div class="doc-detail">  
-                                    {doc.get('specialty', '')} |  
-                                    {doc.get('location', '')} |  
-                                    Matched via:  
-                                    {doc.get('matched_via', 'specialty')}  
-                                </div>  
-                            </div>  
-                            <div class="doc-actions">  
-                                {teams_btn}  
-                                {email_btn}  
-                                {profile_btn}  
-                            </div>  
-                        </div>  
-                    """  
-            else:  
-                html += """  
-                    <div class="no-doctors">  
-                        No matching physicians found.  
-                        Manual lookup may be needed for this drug.  
-                    </div>  
-                """
-
-            html += """  
-                    </div>  
+        html += f"""  
+        <div class="drug-card">  
+            <div class="drug-header">  
+                <h3>#{i} — {a['drug_name']}</h3>  
+                <div class="meta">  
+                    {a['generic_name']} | Approved: {date_disp} |  
+                    {a['submission_type_description']}  
                 </div>  
             </div>  
+            <div class="drug-body">  
+                <div class="info-grid">  
+                    <div>  
+                        <span class="lbl">Sponsor:</span>  
+                        {a['sponsor']}  
+                    </div>  
+                    <div>  
+                        <span class="lbl">Application:</span>  
+                        {a['application_number']}  
+                    </div>  
+                    <div>  
+                        <span class="lbl">Dosage:</span>  
+                        {a['dosage_form']}  
+                    </div>  
+                    <div>  
+                        <span class="lbl">Route:</span>  
+                        {a['route']}  
+                    </div>  
+                    <div>  
+                        <span class="lbl">Ingredients:</span>  
+                        {ingredients}  
+                    </div>  
+                    <div>  
+                        <span class="lbl">Specialties:</span>  
+                        {specs}  
+                    </div>  
+                </div>  
+        """
+
+        # Indication  
+        indication = a.get('indication', '')  
+        if indication and indication != "Indication not available":  
+            ind_short = indication[:400]  
+            if len(indication) > 400:  
+                ind_short += "..."  
+            html += f"""  
+                <div class="indication">  
+                    <strong>Indication:</strong> {ind_short}  
+                </div>  
             """
+
+        # Matched doctors  
+        doctors = a.get("matched_doctors", [])  
+        html += '<div class="doctors">'  
+        html += f'<h4>Matched Northwell Physicians ({len(doctors)})</h4>'
+
+        if doctors:  
+            for doc in doctors[:10]:  
+                phone_btn = ""  
+                if doc.get("phone"):  
+                    phone_btn = (  
+                        f'<a href="tel:{doc["phone"]}" '  
+                        f'class="btn btn-phone">'  
+                        f'{doc["phone"]}</a>'  
+                    )
+
+                profile_btn = ""  
+                if doc.get("profile_url"):  
+                    profile_btn = (  
+                        f'<a href="{doc["profile_url"]}" '  
+                        f'class="btn btn-profile" '  
+                        f'target="_blank">View Profile</a>'  
+                    )
+
+                html += f"""  
+                    <div class="doc-row">  
+                        <div class="doc-info">  
+                            <div class="doc-name">  
+                                {doc['name']}  
+                            </div>  
+                            <div class="doc-detail">  
+                                {doc.get('specialty', '')} |  
+                                {doc.get('location', '')}  
+                            </div>  
+                        </div>  
+                        <div class="doc-actions">  
+                            {profile_btn}  
+                            {phone_btn}  
+                        </div>  
+                    </div>  
+                """  
+        else:  
+            html += """  
+                <div class="no-docs">  
+                    No matching physicians found for this drug.  
+                </div>  
+            """
+
+        html += '</div></div></div>'
 
     html += f"""  
         <div class="footer">  
             <p>Generated automatically by the FDA Drug Approval  
             Monitor</p>  
-            <p>Data sources: openFDA API + Northwell FAD API</p>  
+            <p>Data: openFDA API + Northwell FAD API</p>  
             <p>Generated: {datetime.now().strftime(  
                 '%B %d, %Y at %I:%M %p UTC'  
             )}</p>  
-            <p><em>Please review matches before contacting  
-            physicians. Automated matching is based on specialty  
-            alignment with drug indications.</em></p>  
+            <p><em>Please review matches before contacting.  
+            Matching is based on specialty alignment with drug  
+            indications.</em></p>  
         </div>  
     </body>  
     </html>  
@@ -1070,21 +837,18 @@ def send_email(subject, html_body, to_email, from_email, password):
 
 
 # ============================================================  
-# SECTION 6: MAIN PIPELINE  
+# SECTION 5: MAIN PIPELINE  
 # ============================================================
 
 def main():  
-    """  
-    Main pipeline - connects all pieces together:  
-    FDA Data → Specialty Mapping → Doctor Lookup → Ranking → Report  
-    """  
+    """Main pipeline connecting all pieces together."""  
     print("=" * 70)  
     print("FDA DRUG APPROVAL MONITOR — UNIFIED PIPELINE")  
     print(f"Run time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  
     print("=" * 70)  
     print()
 
-    # ---- STEP 1: Fetch FDA Approvals ----  
+    # STEP 1: Fetch FDA Approvals  
     print("STEP 1: Fetching FDA drug approvals...")  
     print("-" * 50)  
     approvals, date_from, date_to = fetch_fda_approvals(days_back=7)  
@@ -1096,86 +860,87 @@ def main():
         html = build_email_html([], date_from, date_to)  
         with open("fda_report.html", "w") as f:  
             f.write(html)  
-        print("Empty report saved.")  
         return
 
-    # ---- STEP 2: Map Indications to Specialties ----  
-    print("STEP 2: Mapping drug indications to specialties...")  
+    # STEP 2: Map Indications to Specialties  
+    print("STEP 2: Mapping indications to specialties...")  
     print("-" * 50)  
-    for approval in approvals:  
-        specialties = map_indication_to_specialties(  
-            approval["indication"],  
-            approval["drug_name"],  
-            approval["route"]  
+    for a in approvals:  
+        specs = map_indication_to_specialties(  
+            a["indication"], a["drug_name"], a["route"]  
         )  
-        approval["matched_specialties"] = specialties  
-        print(f"  {approval['drug_name']}: {', '.join(specialties)}")  
+        a["matched_specialties"] = specs  
+        print(f"  {a['drug_name']}: {', '.join(specs)}")  
     print()
 
-    # ---- STEP 3: Fetch Real Northwell Physicians ----  
-    print("STEP 3: Fetching Northwell physicians from FAD API...")  
+    # STEP 3: Fetch Northwell Physicians  
+    print("STEP 3: Fetching Northwell physicians (FAD API)...")  
     print("-" * 50)
 
-    # Collect all unique specialties needed  
     all_specialties = set()  
-    for approval in approvals:  
-        for spec in approval["matched_specialties"]:  
-            all_specialties.add(spec)
+    for a in approvals:  
+        for s in a["matched_specialties"]:  
+            all_specialties.add(s)
 
-    print(f"  Unique specialties to search: {len(all_specialties)}")  
-    print(f"  Specialties: {', '.join(sorted(all_specialties))}")  
+    print(f"  Searching {len(all_specialties)} specialties: "  
+          f"{', '.join(sorted(all_specialties))}")  
     print()
 
-    # Fetch doctors for each specialty (with caching)  
-    doctors_by_specialty = {}  
-    for specialty in sorted(all_specialties):  
-        doctors = fetch_northwell_doctors(specialty, max_results=5)  
-        doctors_by_specialty[specialty] = doctors  
-        time.sleep(0.2)  # Rate limiting  
+    doctors_cache = {}  
+    for spec in sorted(all_specialties):  
+        docs = fetch_northwell_doctors(spec, max_results=5)  
+        doctors_cache[spec] = docs  
+        time.sleep(0.3)  
     print()
 
-    # ---- STEP 4: Match and Rank Doctors ----  
-    print("STEP 4: Matching and ranking doctors for each drug...")  
+    # STEP 4: Match Doctors to Drugs  
+    print("STEP 4: Matching doctors to drug approvals...")  
     print("-" * 50)  
-    for approval in approvals:  
-        matched = rank_doctors_for_drug(approval, doctors_by_specialty)  
-        approval["matched_doctors"] = matched  
-        print(  
-            f"  {approval['drug_name']}: "  
-            f"{len(matched)} doctor(s) matched"  
-        )  
+    for a in approvals:  
+        matched = []  
+        seen = set()  
+        for spec in a["matched_specialties"]:  
+            for doc in doctors_cache.get(spec, []):  
+                doc_key = doc["name"] + doc.get("npi", "")  
+                if doc_key not in seen:  
+                    seen.add(doc_key)  
+                    doc_copy = doc.copy()  
+                    doc_copy["matched_via"] = spec  
+                    matched.append(doc_copy)  
+        a["matched_doctors"] = matched  
+        print(f"  {a['drug_name']}: {len(matched)} doctor(s)")  
     print()
 
-    # ---- STEP 5: Generate Report ----  
+    # STEP 5: Generate Report  
     print("STEP 5: Generating report...")  
     print("-" * 50)
 
-    # Print summary to console  
-    print("\nFINAL REPORT SUMMARY")  
+    print("\n" + "=" * 70)  
+    print("FINAL REPORT")  
     print("=" * 70)  
     for i, a in enumerate(approvals, 1):  
         print(f"\n#{i} {a['drug_name']} ({a['generic_name']})")  
         print(f"   Approved: {a['approval_date']}")  
         print(f"   Specialties: {', '.join(a['matched_specialties'])}")  
         print(f"   Matched Doctors: {len(a['matched_doctors'])}")  
-        for doc in a["matched_doctors"][:3]:  
+        for doc in a["matched_doctors"][:5]:  
             print(  
-                f"     → {doc['name']} "  
-                f"({doc.get('specialty', 'N/A')}) "  
-                f"@ {doc.get('location', 'N/A')}"  
+                f"     -> {doc['name']}"  
+                f" | {doc.get('specialty', 'N/A')}"  
+                f" | {doc.get('location', 'N/A')}"  
+                f" | {doc.get('phone', 'N/A')}"  
             )  
-        if len(a["matched_doctors"]) > 3:  
-            print(  
-                f"     ... and {len(a['matched_doctors']) - 3} more"  
-            )
+        if len(a["matched_doctors"]) > 5:  
+            remaining = len(a["matched_doctors"]) - 5  
+            print(f"     ... and {remaining} more")
 
-    # Build HTML report  
+    # Build HTML  
     html = build_email_html(approvals, date_from, date_to)  
     with open("fda_report.html", "w") as f:  
         f.write(html)  
     print("\nHTML report saved to fda_report.html")
 
-    # Save JSON results  
+    # Save JSON  
     results = {  
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  
         "date_range": {"from": date_from, "to": date_to},  
@@ -1184,31 +949,26 @@ def main():
             len(a["matched_doctors"]) for a in approvals  
         ),  
         "approvals": approvals,  
-    }
-
+    }  
     with open("fda_results.json", "w") as f:  
         json.dump(results, f, indent=2, default=str)  
     print("JSON results saved to fda_results.json")
 
-    # Send email if configured  
+    # Email  
     to_email = os.environ.get("EMAIL_TO")  
     from_email = os.environ.get("EMAIL_FROM")  
     email_password = os.environ.get("EMAIL_PASSWORD")
 
     if to_email and from_email and email_password:  
-        total_docs = sum(  
-            len(a["matched_doctors"]) for a in approvals  
-        )  
+        total = sum(len(a["matched_doctors"]) for a in approvals)  
         subject = (  
-            f"FDA Drug Approval Report — "  
-            f"{datetime.now().strftime('%B %d, %Y')} — "  
-            f"{len(approvals)} approvals, "  
-            f"{total_docs} matched doctors"  
+            f"FDA Report — {datetime.now().strftime('%B %d, %Y')}"  
+            f" — {len(approvals)} approvals,"  
+            f" {total} matched doctors"  
         )  
         send_email(subject, html, to_email, from_email, email_password)  
     else:  
-        print("\nEmail not configured — set EMAIL_TO, EMAIL_FROM,")  
-        print("and EMAIL_PASSWORD as repository secrets.")
+        print("\nEmail not configured.")
 
     print("\n" + "=" * 70)  
     print("PIPELINE COMPLETE")  
