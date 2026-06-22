@@ -17,7 +17,8 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta  
 from collections import defaultdict  
 import os  
-import time
+import time  
+import sys
 
 
 # ============================================================  
@@ -109,7 +110,8 @@ def fetch_fda_approvals(days_back=7):
 
                 try:  
                     sub_date_int = int(sub_date)  
-                    if not (int(date_from) <= sub_date_int <= int(date_to)):  
+                    if not (int(date_from) <= sub_date_int  
+                            <= int(date_to)):  
                         continue  
                 except (ValueError, TypeError):  
                     continue
@@ -125,13 +127,21 @@ def fetch_fda_approvals(days_back=7):
                 active_ingredients = []
 
                 if products:  
-                    drug_name = products[0].get("brand_name", "Unknown")  
-                    dosage_form = products[0].get("dosage_form", "Unknown")  
+                    drug_name = products[0].get(  
+                        "brand_name", "Unknown"  
+                    )  
+                    dosage_form = products[0].get(  
+                        "dosage_form", "Unknown"  
+                    )  
                     route = products[0].get("route", "Unknown")  
-                    for ai in products[0].get("active_ingredients", []):  
+                    for ai in products[0].get(  
+                        "active_ingredients", []  
+                    ):  
                         active_ingredients.append({  
                             "name": ai.get("name", "Unknown"),  
-                            "strength": ai.get("strength", "Unknown")  
+                            "strength": ai.get(  
+                                "strength", "Unknown"  
+                            )  
                         })
 
                 generic_name = "Unknown"  
@@ -163,7 +173,7 @@ def fetch_fda_approvals(days_back=7):
                 })
 
         # Fetch indications  
-        print(f"Found {len(approvals)} new approval(s) in date range.")  
+        print(f"Found {len(approvals)} new approval(s) in range.")  
         print("Fetching drug indications...")
 
         fetched_indications = {}  
@@ -198,7 +208,9 @@ INDICATION_SPECIALTY_MAP = {
     "atrial fibrillation": ["Cardiology"],  
     "anticoagulant": ["Cardiology"],  
     "thrombin inhibitor": ["Cardiology"],  
-    "pulmonary arterial hypertension": ["Pulmonology", "Cardiology"],  
+    "pulmonary arterial hypertension": [  
+        "Pulmonology", "Cardiology"  
+    ],  
     "endothelin receptor": ["Cardiology", "Pulmonology"],  
     "losartan": ["Cardiology"],  
     "angiotensin": ["Cardiology"],  
@@ -217,7 +229,6 @@ INDICATION_SPECIALTY_MAP = {
     "glioma": ["Oncology", "Neurology"],  
     "metastatic": ["Oncology"],  
     "myelodysplastic": ["Oncology"],  
-    "nucleoside metabolic inhibitor": ["Oncology"],  
     "capecitabine": ["Oncology"],  
     "azacitidine": ["Oncology"],
 
@@ -227,6 +238,8 @@ INDICATION_SPECIALTY_MAP = {
     "neurological": ["Neurology"],  
     "anticonvulsant": ["Neurology"],  
     "antiepileptic": ["Neurology"],  
+    "partial onset": ["Neurology"],  
+    "tonic-clonic": ["Neurology"],  
     "lacosamide": ["Neurology"],  
     "perampanel": ["Neurology"],  
     "topiramate": ["Neurology"],  
@@ -292,8 +305,8 @@ INDICATION_SPECIALTY_MAP = {
     "diabetes": ["Endocrinology"],  
     "thyroid": ["Endocrinology"],  
     "hormone": ["Endocrinology"],  
-    "estradiol": ["Endocrinology", "Obstetrics and Gynecology"],  
-    "menopausal": ["Endocrinology", "Obstetrics and Gynecology"],  
+    "estradiol": ["Endocrinology", "OB/GYN"],  
+    "menopausal": ["Endocrinology", "OB/GYN"],  
     "bisphosphonate": ["Endocrinology"],  
     "risedronate": ["Endocrinology"],  
     "alendronate": ["Endocrinology"],
@@ -326,12 +339,13 @@ INDICATION_SPECIALTY_MAP = {
     # Emergency Medicine  
     "naloxone": ["Emergency Medicine"],  
     "opioid overdose": ["Emergency Medicine"],  
-    "opioid antagonist": ["Emergency Medicine"],
+    "opioid antagonist": ["Emergency Medicine"],  
+    "rextovy": ["Emergency Medicine"],
 
-    # Obstetrics / Gynecology  
-    "pregnancy": ["Obstetrics and Gynecology"],  
-    "doxylamine": ["Obstetrics and Gynecology"],  
-    "pyridoxine": ["Obstetrics and Gynecology"],
+    # OB/GYN  
+    "pregnancy": ["OB/GYN"],  
+    "doxylamine": ["OB/GYN"],  
+    "pyridoxine": ["OB/GYN"],
 
     # Topical/route based  
     "topical": ["Dermatology"],  
@@ -340,18 +354,17 @@ INDICATION_SPECIALTY_MAP = {
 
 def map_indication_to_specialties(indication_text, drug_name="",  
                                    route=""):  
-    """Map drug indication text to relevant medical specialties."""  
+    """Map drug indication to relevant medical specialties."""  
     matched = set()
 
-    # Check indication text  
-    if indication_text and indication_text != "Indication not available":  
+    if indication_text and indication_text != \  
+            "Indication not available":  
         indication_lower = indication_text.lower()  
         for keyword, specs in INDICATION_SPECIALTY_MAP.items():  
             if keyword.lower() in indication_lower:  
                 for s in specs:  
                     matched.add(s)
 
-    # Check drug name  
     if drug_name:  
         drug_lower = drug_name.lower()  
         for keyword, specs in INDICATION_SPECIALTY_MAP.items():  
@@ -359,7 +372,6 @@ def map_indication_to_specialties(indication_text, drug_name="",
                 for s in specs:  
                     matched.add(s)
 
-    # Route-based fallback  
     if not matched and route:  
         route_lower = route.lower()  
         if "ophthalmic" in route_lower:  
@@ -367,7 +379,6 @@ def map_indication_to_specialties(indication_text, drug_name="",
         elif "topical" in route_lower:  
             matched.add("Dermatology")
 
-    # Ultimate fallback  
     if not matched:  
         matched.add("Internal Medicine")
 
@@ -378,42 +389,88 @@ def map_indication_to_specialties(indication_text, drug_name="",
 # SECTION 3: NORTHWELL FAD API (REAL DOCTOR DATA)  
 # ============================================================
 
+# Map our specialty names to what FAD API expects  
+FAD_SPECIALTY_MAP = {  
+    "Cardiology": "cardiology",  
+    "Oncology": "oncology",  
+    "Neurology": "neurology",  
+    "Dermatology": "dermatology",  
+    "Pulmonology": "pulmonology",  
+    "Rheumatology": "rheumatology",  
+    "Ophthalmology": "ophthalmology",  
+    "Gastroenterology": "gastroenterology",  
+    "Nephrology": "nephrology",  
+    "Endocrinology": "endocrinology",  
+    "Infectious Disease": "infectious-disease",  
+    "Psychiatry": "psychiatry",  
+    "Radiology": "radiology",  
+    "Anesthesiology": "anesthesiology",  
+    "Emergency Medicine": "emergency-medicine",  
+    "Internal Medicine": "internal-medicine",  
+    "OB/GYN": "obstetrics-and-gynecology",  
+    "Obstetrics and Gynecology": "obstetrics-and-gynecology",  
+}
+
+
 def fetch_northwell_doctors(specialty, max_results=5):  
     """  
     Fetch real Northwell doctors from the FAD API.
 
-    Correct endpoint: /v3/providers/search?specialty=X  
-    Response structure confirmed from browser testing.  
+    Confirmed working endpoint from browser testing:  
+    GET https://fadapi.northwell.io/v3/providers/search  
+        ?specialty=cardiology
+
+    Response: {"code":200, "results":[{doctor data}...]}  
     """  
+    # Map specialty to FAD API format  
+    fad_specialty = FAD_SPECIALTY_MAP.get(  
+        specialty, specialty.lower().replace(" ", "-")  
+    )
+
     try:  
         url = (  
             f"https://fadapi.northwell.io/v3/providers/search"  
-            f"?specialty={requests.utils.quote(specialty)}"  
+            f"?specialty={fad_specialty}"  
         )
 
+        # Mimic browser headers exactly  
         headers = {  
-            "Accept": "application/json",  
+            "Accept": (  
+                "text/html,application/xhtml+xml,"  
+                "application/xml;q=0.9,"  
+                "image/avif,image/webp,image/apng,*/*;q=0.8"  
+            ),  
+            "Accept-Language": "en-US,en;q=0.9",  
             "User-Agent": (  
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "  
-                "AppleWebKit/537.36"  
+                "AppleWebKit/537.36 (KHTML, like Gecko) "  
+                "Chrome/137.0.0.0 Safari/537.36"  
             ),  
+            "Connection": "keep-alive",  
+            "Cache-Control": "no-cache",  
         }
 
-        print(f"    Searching FAD API: {specialty}...")  
+        print(f"    FAD API: {url}")  
         response = requests.get(url, headers=headers, timeout=15)
+
+        print(f"    Status: {response.status_code}")  
+        print(f"    Response length: {len(response.text)} chars")
+
+        # Debug: show first 200 chars of response  
+        preview = response.text[:200]  
+        print(f"    Preview: {preview}")
 
         if response.status_code == 200:  
             data = response.json()
 
-            # FAD API returns: {"code":200, "results":[...]}  
+            # FAD API structure:  
+            # {"code":200, "results":[...]}  
             results = data.get("results", [])
 
-            if not results and isinstance(data, list):  
-                results = data
+            print(f"    Parsed {len(results)} provider(s)")
 
             doctors = []  
             for provider in results[:max_results]:  
-                # Extract name  
                 first = provider.get("firstname", "")  
                 last = provider.get("lastname", "")  
                 degrees = provider.get("degrees", [])  
@@ -424,84 +481,70 @@ def fetch_northwell_doctors(specialty, max_results=5):
                     if degree_str:  
                         name += f", {degree_str}"  
                 else:  
-                    display = provider.get("displayName", "")  
-                    name = display if display else "Unknown"
+                    name = "Unknown"
 
-                # Extract location  
                 city = provider.get("city", "")  
-                state = provider.get("state_abbr",  
-                         provider.get("state", ""))  
+                state_abbr = provider.get(  
+                    "state_abbr",  
+                    provider.get("state", "")  
+                )  
                 practice = provider.get("practice_name", "")  
                 address = provider.get("street_address", "")
 
                 if practice and city:  
-                    location = f"{practice}, {city}, {state}"  
+                    location = f"{practice}, {city}, {state_abbr}"  
                 elif city:  
-                    location = f"{city}, {state}"  
+                    location = f"{city}, {state_abbr}"  
                 else:  
                     location = "Location not available"
 
-                # Extract phone  
                 phone = provider.get("phone", "")  
                 if isinstance(phone, dict):  
-                    phone = phone.get("formatted", str(phone))
+                    phone = phone.get("formatted", "")
 
-                # Extract profile URL  
                 url_path = provider.get("url", "")  
                 if url_path and not url_path.startswith("http"):  
-                    profile_url = f"https://www.northwell.edu{url_path}"  
-                elif url_path:  
-                    profile_url = url_path  
+                    profile_url = (  
+                        f"https://www.northwell.edu{url_path}"  
+                    )  
                 else:  
-                    npi = provider.get("provider_soarian_npi", "")  
-                    profile_url = ""
+                    profile_url = url_path or ""
 
-                # Extract NPI  
-                npi = provider.get(  
+                npi = str(provider.get(  
                     "provider_soarian_npi",  
                     provider.get("npi", "")  
+                ))
+
+                department = provider.get(  
+                    "department_me", specialty  
                 )
 
-                # Get department  
-                department = provider.get("department_me", specialty)
-
-                # Build email from name pattern (Northwell format)  
-                # This is a guess - may need adjustment  
-                email = ""
-
-                doctor = {  
+                doctors.append({  
                     "name": name,  
                     "specialty": department,  
                     "location": location,  
                     "address": address,  
                     "city": city,  
-                    "state": state,  
+                    "state": state_abbr,  
                     "phone": str(phone),  
-                    "npi": str(npi),  
+                    "npi": npi,  
                     "profile_url": profile_url,  
                     "practice_name": practice,  
                     "gender": provider.get("gender", ""),  
-                    "teams_link": "",  
-                    "email": email,  
                     "match_type": "DIRECT_SPECIALTY_MATCH",  
                     "relevance_score": 1.0,  
                     "matched_via": specialty,  
-                }
+                })
 
-                doctors.append(doctor)
-
-            print(f"    Found {len(doctors)} doctor(s) for {specialty}")  
+            print(f"    Extracted {len(doctors)} doctor(s)")  
             return doctors
 
         else:  
-            print(  
-                f"    FAD API returned status {response.status_code} "  
-                f"for {specialty}"  
-            )  
+            print(f"    FAD API error for {specialty}")  
             return []
 
     except Exception as e:  
-        print(f"    Error querying FAD API for {specialty}: {e}")  
+        print(f"    Error: {e}")  
         return []
 
 
@@ -510,7 +553,7 @@ def fetch_northwell_doctors(specialty, max_results=5):
 # ============================================================
 
 def build_email_html(approvals, date_from, date_to):  
-    """Build the complete HTML email report for Maddie."""  
+    """Build HTML email report for Maddie."""  
     try:  
         from_display = datetime.strptime(  
             date_from, "%Y%m%d"  
@@ -532,42 +575,29 @@ def build_email_html(approvals, date_from, date_to):
         <style>  
             body {{  
                 font-family: Arial, sans-serif;  
-                color: #333;  
-                max-width: 950px;  
+                color: #333; max-width: 950px;  
                 margin: 0 auto;  
             }}  
             .header {{  
-                background: linear-gradient(135deg, #0078d4, #00a4ef);  
-                color: white;  
-                padding: 25px 30px;  
+                background: linear-gradient(  
+                    135deg, #0078d4, #00a4ef  
+                );  
+                color: white; padding: 25px 30px;  
                 border-radius: 8px 8px 0 0;  
             }}  
             .header h1 {{ margin: 0; font-size: 22px; }}  
             .header p {{ margin: 5px 0 0 0; opacity: 0.9; }}  
             .summary {{  
-                background-color: #f0f6ff;  
+                background: #f0f6ff;  
                 padding: 15px 30px;  
                 border-bottom: 2px solid #0078d4;  
-            }}  
-            .summary-stats {{  
-                display: flex; gap: 40px;  
-            }}  
-            .stat {{ text-align: center; }}  
-            .stat .number {{  
-                font-size: 28px;  
-                font-weight: bold;  
-                color: #0078d4;  
-            }}  
-            .stat .label {{  
-                font-size: 12px; color: #666;  
             }}  
             .drug-card {{  
                 border: 1px solid #e0e0e0;  
                 border-left: 4px solid #0078d4;  
                 border-radius: 4px;  
                 margin: 20px 30px;  
-                background: white;  
-                overflow: hidden;  
+                background: white; overflow: hidden;  
             }}  
             .drug-header {{  
                 background: #f8f9fa;  
@@ -575,11 +605,12 @@ def build_email_html(approvals, date_from, date_to):
                 border-bottom: 1px solid #e0e0e0;  
             }}  
             .drug-header h3 {{  
-                color: #0078d4;  
-                margin: 0; font-size: 18px;  
+                color: #0078d4; margin: 0;  
+                font-size: 18px;  
             }}  
             .drug-header .meta {{  
-                color: #666; font-size: 13px; margin-top: 4px;  
+                color: #666; font-size: 13px;  
+                margin-top: 4px;  
             }}  
             .drug-body {{ padding: 15px 20px; }}  
             .info-grid {{  
@@ -596,8 +627,7 @@ def build_email_html(approvals, date_from, date_to):
                 border-radius: 4px;  
                 padding: 12px 15px;  
                 margin: 12px 0;  
-                font-size: 13px;  
-                line-height: 1.5;  
+                font-size: 13px; line-height: 1.5;  
             }}  
             .doctors {{  
                 margin-top: 15px;  
@@ -605,25 +635,23 @@ def build_email_html(approvals, date_from, date_to):
                 padding-top: 15px;  
             }}  
             .doctors h4 {{  
-                color: #333;  
-                margin: 0 0 10px 0;  
+                color: #333; margin: 0 0 10px 0;  
                 font-size: 15px;  
             }}  
             .doc-row {{  
-                display: flex;  
-                align-items: center;  
-                padding: 10px 12px;  
-                margin: 4px 0;  
-                background: #f8f9fa;  
-                border-radius: 4px;  
+                display: flex; align-items: center;  
+                padding: 10px 12px; margin: 4px 0;  
+                background: #f8f9fa; border-radius: 4px;  
                 border-left: 3px solid #28a745;  
             }}  
             .doc-info {{ flex: 1; }}  
             .doc-name {{  
-                font-weight: bold; color: #333; font-size: 14px;  
+                font-weight: bold; color: #333;  
+                font-size: 14px;  
             }}  
             .doc-detail {{  
-                color: #666; font-size: 12px; margin-top: 2px;  
+                color: #666; font-size: 12px;  
+                margin-top: 2px;  
             }}  
             .doc-actions {{  
                 display: flex; gap: 6px;  
@@ -634,8 +662,7 @@ def build_email_html(approvals, date_from, date_to):
                 border-radius: 4px;  
                 text-decoration: none;  
                 font-size: 11px;  
-                font-weight: bold;  
-                color: white;  
+                font-weight: bold; color: white;  
             }}  
             .btn-profile {{ background: #28a745; }}  
             .btn-phone {{ background: #6c757d; }}  
@@ -645,8 +672,7 @@ def build_email_html(approvals, date_from, date_to):
             }}  
             .footer {{  
                 padding: 20px 30px;  
-                font-size: 12px;  
-                color: #999;  
+                font-size: 12px; color: #999;  
                 border-top: 1px solid #eee;  
                 margin-top: 20px;  
             }}  
@@ -655,29 +681,18 @@ def build_email_html(approvals, date_from, date_to):
     <body>  
         <div class="header">  
             <h1>FDA Daily Drug Approval Report</h1>  
-            <p>Northwell Health — Physician Matching Report</p>  
+            <p>Northwell Health Physician Matching</p>  
             <p style="font-size:12px;">  
-                Date Range: {from_display} to {to_display}  
+                {from_display} to {to_display}  
             </p>  
         </div>  
         <div class="summary">  
-            <div class="summary-stats">  
-                <div class="stat">  
-                    <div class="number">{len(approvals)}</div>  
-                    <div class="label">Drug Approvals</div>  
-                </div>  
-                <div class="stat">  
-                    <div class="number">{total_doctors}</div>  
-                    <div class="label">Matched Physicians</div>  
-                </div>  
-                <div class="stat">  
-                    <div class="number">{len(set(  
-                        s for a in approvals  
-                        for s in a.get('matched_specialties', [])  
-                    ))}</div>  
-                    <div class="label">Specialties</div>  
-                </div>  
-            </div>  
+            <strong>{len(approvals)}</strong> Drug Approvals |  
+            <strong>{total_doctors}</strong> Matched Physicians |  
+            <strong>{len(set(  
+                s for a in approvals  
+                for s in a.get('matched_specialties', [])  
+            ))}</strong> Specialties  
         </div>  
     """
 
@@ -694,14 +709,17 @@ def build_email_html(approvals, date_from, date_to):
         except (ValueError, TypeError):  
             date_disp = a['approval_date']
 
-        specs = ", ".join(a.get("matched_specialties", ["N/A"]))
+        specs = ", ".join(  
+            a.get("matched_specialties", ["N/A"])  
+        )
 
         html += f"""  
         <div class="drug-card">  
             <div class="drug-header">  
                 <h3>#{i} — {a['drug_name']}</h3>  
                 <div class="meta">  
-                    {a['generic_name']} | Approved: {date_disp} |  
+                    {a['generic_name']} |  
+                    Approved: {date_disp} |  
                     {a['submission_type_description']}  
                 </div>  
             </div>  
@@ -734,7 +752,6 @@ def build_email_html(approvals, date_from, date_to):
                 </div>  
         """
 
-        # Indication  
         indication = a.get('indication', '')  
         if indication and indication != "Indication not available":  
             ind_short = indication[:400]  
@@ -746,10 +763,12 @@ def build_email_html(approvals, date_from, date_to):
                 </div>  
             """
 
-        # Matched doctors  
         doctors = a.get("matched_doctors", [])  
         html += '<div class="doctors">'  
-        html += f'<h4>Matched Northwell Physicians ({len(doctors)})</h4>'
+        html += (  
+            f'<h4>Matched Northwell Physicians '  
+            f'({len(doctors)})</h4>'  
+        )
 
         if doctors:  
             for doc in doctors[:10]:  
@@ -766,7 +785,7 @@ def build_email_html(approvals, date_from, date_to):
                     profile_btn = (  
                         f'<a href="{doc["profile_url"]}" '  
                         f'class="btn btn-profile" '  
-                        f'target="_blank">View Profile</a>'  
+                        f'target="_blank">Profile</a>'  
                     )
 
                 html += f"""  
@@ -777,7 +796,9 @@ def build_email_html(approvals, date_from, date_to):
                             </div>  
                             <div class="doc-detail">  
                                 {doc.get('specialty', '')} |  
-                                {doc.get('location', '')}  
+                                {doc.get('location', '')} |  
+                                Matched via:  
+                                {doc.get('matched_via', '')}  
                             </div>  
                         </div>  
                         <div class="doc-actions">  
@@ -789,7 +810,7 @@ def build_email_html(approvals, date_from, date_to):
         else:  
             html += """  
                 <div class="no-docs">  
-                    No matching physicians found for this drug.  
+                    No matching physicians found.  
                 </div>  
             """
 
@@ -797,15 +818,13 @@ def build_email_html(approvals, date_from, date_to):
 
     html += f"""  
         <div class="footer">  
-            <p>Generated automatically by the FDA Drug Approval  
-            Monitor</p>  
-            <p>Data: openFDA API + Northwell FAD API</p>  
-            <p>Generated: {datetime.now().strftime(  
+            <p>Generated by FDA Drug Approval Monitor</p>  
+            <p>Sources: openFDA API + Northwell FAD API</p>  
+            <p>{datetime.now().strftime(  
                 '%B %d, %Y at %I:%M %p UTC'  
             )}</p>  
-            <p><em>Please review matches before contacting.  
-            Matching is based on specialty alignment with drug  
-            indications.</em></p>  
+            <p><em>Please review before contacting  
+            physicians.</em></p>  
         </div>  
     </body>  
     </html>  
@@ -814,8 +833,9 @@ def build_email_html(approvals, date_from, date_to):
     return html
 
 
-def send_email(subject, html_body, to_email, from_email, password):  
-    """Send HTML email via SMTP."""  
+def send_email(subject, html_body, to_email, from_email,  
+               password):  
+    """Send HTML email."""  
     msg = MIMEMultipart("alternative")  
     msg["Subject"] = subject  
     msg["From"] = from_email  
@@ -841,28 +861,30 @@ def send_email(subject, html_body, to_email, from_email, password):
 # ============================================================
 
 def main():  
-    """Main pipeline connecting all pieces together."""  
+    """Main pipeline."""  
     print("=" * 70)  
     print("FDA DRUG APPROVAL MONITOR — UNIFIED PIPELINE")  
-    print(f"Run time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  
+    print(f"Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  
     print("=" * 70)  
     print()
 
-    # STEP 1: Fetch FDA Approvals  
+    # STEP 1: FDA Approvals  
     print("STEP 1: Fetching FDA drug approvals...")  
     print("-" * 50)  
-    approvals, date_from, date_to = fetch_fda_approvals(days_back=7)  
+    approvals, date_from, date_to = fetch_fda_approvals(  
+        days_back=7  
+    )  
     print(f"\nFound {len(approvals)} new approval(s)")  
     print()
 
     if not approvals:  
-        print("No approvals found. Generating empty report.")  
+        print("No approvals found.")  
         html = build_email_html([], date_from, date_to)  
         with open("fda_report.html", "w") as f:  
             f.write(html)  
         return
 
-    # STEP 2: Map Indications to Specialties  
+    # STEP 2: Specialty Mapping  
     print("STEP 2: Mapping indications to specialties...")  
     print("-" * 50)  
     for a in approvals:  
@@ -873,37 +895,37 @@ def main():
         print(f"  {a['drug_name']}: {', '.join(specs)}")  
     print()
 
-    # STEP 3: Fetch Northwell Physicians  
-    print("STEP 3: Fetching Northwell physicians (FAD API)...")  
+    # STEP 3: Northwell Physicians  
+    print("STEP 3: Fetching Northwell physicians...")  
     print("-" * 50)
 
-    all_specialties = set()  
+    all_specs = set()  
     for a in approvals:  
         for s in a["matched_specialties"]:  
-            all_specialties.add(s)
+            all_specs.add(s)
 
-    print(f"  Searching {len(all_specialties)} specialties: "  
-          f"{', '.join(sorted(all_specialties))}")  
+    print(f"  Specialties: {', '.join(sorted(all_specs))}")  
     print()
 
     doctors_cache = {}  
-    for spec in sorted(all_specialties):  
+    for spec in sorted(all_specs):  
+        print(f"  --- Searching: {spec} ---")  
         docs = fetch_northwell_doctors(spec, max_results=5)  
         doctors_cache[spec] = docs  
-        time.sleep(0.3)  
-    print()
+        print()  
+        time.sleep(0.5)
 
-    # STEP 4: Match Doctors to Drugs  
-    print("STEP 4: Matching doctors to drug approvals...")  
+    # STEP 4: Match  
+    print("STEP 4: Matching doctors to drugs...")  
     print("-" * 50)  
     for a in approvals:  
         matched = []  
         seen = set()  
         for spec in a["matched_specialties"]:  
             for doc in doctors_cache.get(spec, []):  
-                doc_key = doc["name"] + doc.get("npi", "")  
-                if doc_key not in seen:  
-                    seen.add(doc_key)  
+                key = doc["name"] + doc.get("npi", "")  
+                if key not in seen:  
+                    seen.add(key)  
                     doc_copy = doc.copy()  
                     doc_copy["matched_via"] = spec  
                     matched.append(doc_copy)  
@@ -911,7 +933,7 @@ def main():
         print(f"  {a['drug_name']}: {len(matched)} doctor(s)")  
     print()
 
-    # STEP 5: Generate Report  
+    # STEP 5: Report  
     print("STEP 5: Generating report...")  
     print("-" * 50)
 
@@ -921,31 +943,27 @@ def main():
     for i, a in enumerate(approvals, 1):  
         print(f"\n#{i} {a['drug_name']} ({a['generic_name']})")  
         print(f"   Approved: {a['approval_date']}")  
-        print(f"   Specialties: {', '.join(a['matched_specialties'])}")  
-        print(f"   Matched Doctors: {len(a['matched_doctors'])}")  
+        print(f"   Specialties: "  
+              f"{', '.join(a['matched_specialties'])}")  
+        print(f"   Doctors: {len(a['matched_doctors'])}")  
         for doc in a["matched_doctors"][:5]:  
             print(  
                 f"     -> {doc['name']}"  
-                f" | {doc.get('specialty', 'N/A')}"  
-                f" | {doc.get('location', 'N/A')}"  
-                f" | {doc.get('phone', 'N/A')}"  
-            )  
-        if len(a["matched_doctors"]) > 5:  
-            remaining = len(a["matched_doctors"]) - 5  
-            print(f"     ... and {remaining} more")
+                f" | {doc.get('specialty', '')}"  
+                f" | {doc.get('city', '')}"  
+                f" | {doc.get('phone', '')}"  
+            )
 
-    # Build HTML  
     html = build_email_html(approvals, date_from, date_to)  
     with open("fda_report.html", "w") as f:  
         f.write(html)  
     print("\nHTML report saved to fda_report.html")
 
-    # Save JSON  
     results = {  
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  
         "date_range": {"from": date_from, "to": date_to},  
         "total_approvals": len(approvals),  
-        "total_matched_doctors": sum(  
+        "total_doctors": sum(  
             len(a["matched_doctors"]) for a in approvals  
         ),  
         "approvals": approvals,  
@@ -954,19 +972,23 @@ def main():
         json.dump(results, f, indent=2, default=str)  
     print("JSON results saved to fda_results.json")
 
-    # Email  
     to_email = os.environ.get("EMAIL_TO")  
     from_email = os.environ.get("EMAIL_FROM")  
     email_password = os.environ.get("EMAIL_PASSWORD")
 
     if to_email and from_email and email_password:  
-        total = sum(len(a["matched_doctors"]) for a in approvals)  
-        subject = (  
-            f"FDA Report — {datetime.now().strftime('%B %d, %Y')}"  
-            f" — {len(approvals)} approvals,"  
-            f" {total} matched doctors"  
+        total = sum(  
+            len(a["matched_doctors"]) for a in approvals  
         )  
-        send_email(subject, html, to_email, from_email, email_password)  
+        subject = (  
+            f"FDA Report — "  
+            f"{datetime.now().strftime('%B %d, %Y')}"  
+            f" — {len(approvals)} approvals,"  
+            f" {total} doctors"  
+        )  
+        send_email(  
+            subject, html, to_email, from_email, email_password  
+        )  
     else:  
         print("\nEmail not configured.")
 
