@@ -19,9 +19,14 @@ jobs:
       - name: Run Graph Analysis  
         run: python physician_graph.py
 
+      - name: Generate Graph Visualization  
+        run: python visualize_graph.py
+
       - name: Upload results  
         uses: actions/upload-artifact@v4  
         with:  
           name: graph-analysis-${{ github.run_number }}  
-          path: graph_analysis_results.json  
+          path: |  
+            graph_analysis_results.json  
+            physician_graph.html  
           retention-days: 30  
