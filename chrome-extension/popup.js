@@ -8,8 +8,11 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("dateFrom").value =  
     formatDateInput(weekAgo);
 
-  document.getElementById("downloadBtn")  
-    .addEventListener("click", fetchAndDownload);  
+  document.getElementById("downloadBtn")
+    .addEventListener("click", fetchAndDownload);
+  
+  document.getElementById("updateMasterBtn")
+    .addEventListener("click", updateMasterSpreadsheet); 
 });
 
 
@@ -182,6 +185,86 @@ function escapeXml(str) {
   return out.join("");  
 }  
 
+function loadMasterData() {
+  return new Promise(function(resolve) {
+    chrome.storage.local.get(
+      ["masterApprovals"],
+      function(result) {
+        resolve(result.masterApprovals || []);
+      }
+    );
+  });
+}
+
+function saveMasterData(data) {
+  return new Promise(function(resolve) {
+    chrome.storage.local.set(
+      {
+        masterApprovals: data
+      },
+      function() {
+        resolve();
+      }
+    );
+  });
+}
+
+function createApprovalKey(approval) {
+  return approval.application_number +
+         "_" +
+         approval.approval_date_raw;
+}
+
+async function updateMasterSpreadsheet() {
+
+  try {
+
+    setStatus(
+      "loading",
+      "Loading master dataset..."
+    );
+
+    var existingData =
+      await loadMasterData();
+
+    var today =
+      new Date();
+
+    var yearAgo =
+      new Date();
+
+    yearAgo.setFullYear(
+      today.getFullYear() - 1
+    );
+
+    var fromDate =
+      formatDateInput(yearAgo);
+
+    var toDate =
+      formatDateInput(today);
+
+    setStatus(
+      "loading",
+      "Building master spreadsheet..."
+    );
+
+    fetchAndDownloadMaster(
+      fromDate,
+      toDate,
+      existingData
+    );
+
+  }
+  catch(err) {
+
+    setStatus(
+      "error",
+      err.message
+    );
+
+  }
+
+}
 
 function fetchAndDownload() {  
   var btn = document.getElementById("downloadBtn");  
