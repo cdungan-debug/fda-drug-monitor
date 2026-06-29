@@ -8,8 +8,14 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("dateFrom").value =  
     formatDateInput(weekAgo);
 
-  document.getElementById("downloadBtn")  
-    .addEventListener("click", fetchAndDownload);  
+
+
+  document.getElementById("downloadBtn")
+  .addEventListener("click", fetchAndDownload);
+
+document.getElementById("updateMasterBtn")
+  .addEventListener("click", updateMasterSpreadsheet);
+  
 });
 
 
