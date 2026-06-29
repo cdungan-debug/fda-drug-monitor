@@ -47,8 +47,7 @@ function setStatus(type, message) {
   var el = document.getElementById("status");  
   el.className = "status " + type;  
   if (type === "loading") {  
-    el.innerHTML =  
-      "" + message;  
+    el.innerHTML = "" + message;  
   } else {  
     el.innerHTML = message;  
   }  
@@ -101,6 +100,62 @@ function fetchIndication(appNumber) {
       })  
       .catch(function () {  
         resolve({ indication: "N/A", pharmClass: "" });  
+      });  
+  });  
+}
+
+
+function fetchRxClassByName(drugName) {  
+  return new Promise(function (resolve) {  
+    if (!drugName || drugName === "Unknown") {  
+      resolve("");  
+      return;  
+    }  
+    var cleanName = drugName.split(" ")[0].toLowerCase();  
+    var rxNormUrl =  
+      "https://rxnav.nlm.nih.gov/REST/rxcui.json?name=" +  
+      encodeURIComponent(cleanName) +  
+      "&search=2";  
+    fetch(rxNormUrl)  
+      .then(function (r) {  
+        return r.json();  
+      })  
+      .then(function (data) {  
+        var group = data.idGroup || {};  
+        var rxcuiList = group.rxnormId || [];  
+        if (rxcuiList.length === 0) {  
+          resolve("");  
+          return;  
+        }  
+        var rxcui = rxcuiList[0];  
+        var classUrl =  
+          "https://rxnav.nlm.nih.gov/REST/rxclass/class/byRxcui.json?rxcui=" +  
+          rxcui +  
+          "&relaSource=ATC&relas=may_treat,has_EPC,ci_with";  
+        fetch(classUrl)  
+          .then(function (r2) {  
+            return r2.json();  
+          })  
+          .then(function (classData) {  
+            var entries =  
+              (classData.rxclassDrugInfoList || {})  
+                .rxclassDrugInfo || [];  
+            var classNames = [];  
+            for (var i = 0; i < entries.length; i++) {  
+              var cn =  
+                entries[i].rxclassMinConceptItem || {};  
+              if (cn.className) {  
+                classNames.push(cn.className);  
+              }  
+            }  
+            resolve(classNames.join("; "));  
+          })  
+          .catch(function () {  
+            resolve("");  
+          });  
+      })  
+      .catch(function () {  
+        resolve("");  
       });  
   });  
 }
@@ -673,46 +728,97 @@ function fetchAndDownload() {
         var indMap = {};  
         for (var x = 0; x < appKeys.length; x++) {  
           indMap[appKeys[x]] = indResults[x];  
-        }  
+        }
+
         for (var b = 0; b < approvals.length; b++) {  
           var result =  
             indMap[approvals[b].application_number]  
             || { indication: "N/A", pharmClass: "" };  
           approvals[b].indication = result.indication;  
           approvals[b].pharmClass = result.pharmClass;  
-          approvals[b].specialty =  
-            mapIndicationToSpecialty(  
-              result.indication,  
-              approvals[b].drug_name,  
-              result.pharmClass  
-            );  
         }
 
-        approvals.sort(function (a, b) {  
-          if (a.approval_date_raw !==  
-              b.approval_date_raw) {  
-            return a.approval_date_raw  
-              .localeCompare(b.approval_date_raw);  
-          }  
-          return a.drug_name  
-            .localeCompare(b.drug_name);  
-        });
-
         setStatus("loading",  
-          "Generating formatted report...");  
-        generateFormattedExcel(  
-          approvals, fromDate, toDate  
+          "Looking up drug classifications via NIH RxClass...");
+
+        var rxPromises = [];  
+        var rxIndexes = [];
+
+        for (var c = 0; c < approvals.length; c++) {  
+          if (approvals[c].pharmClass === "" &&  
+              approvals[c].indication === "N/A") {  
+            var lookupName =  
+              approvals[c].generic_name !== "Unknown"  
+                ? approvals[c].generic_name  
+                : approvals[c].drug_name;  
+            rxPromises.push(  
+              fetchRxClassByName(lookupName)  
+            );  
+            rxIndexes.push(c);  
+          }  
+        }
+
+        if (rxPromises.length === 0) {  
+          finishReport(approvals, fromDate, toDate, btn);  
+          return;  
+        }
+
+        Promise.all(rxPromises).then(  
+          function (rxResults) {  
+            for (var r = 0; r < rxResults.length; r++) {  
+              var idx = rxIndexes[r];  
+              if (rxResults[r]) {  
+                approvals[idx].pharmClass =  
+                  rxResults[r];  
+                if (approvals[idx].indication === "N/A") {  
+                  approvals[idx].indication =  
+                    "RxClass: " + rxResults[r];  
+                }  
+              }  
+            }  
+            finishReport(  
+              approvals, fromDate, toDate, btn  
+            );  
+          }  
         );  
-        setStatus("success",  
-          "Downloaded " + approvals.length +  
-          " drug approval(s).");  
-        btn.disabled = false;  
       });  
     })  
     .catch(function (err) {  
       setStatus("error", "Error: " + err.message);  
       btn.disabled = false;  
     });  
+}
+
+
+function finishReport(approvals, fromDate, toDate, btn) {  
+  for (var b = 0; b < approvals.length; b++) {  
+    approvals[b].specialty =  
+      mapIndicationToSpecialty(  
+        approvals[b].indication,  
+        approvals[b].drug_name,  
+        approvals[b].pharmClass  
+      );  
+  }
+
+  approvals.sort(function (a, b) {  
+    if (a.approval_date_raw !==  
+        b.approval_date_raw) {  
+      return a.approval_date_raw  
+        .localeCompare(b.approval_date_raw);  
+    }  
+    return a.drug_name  
+      .localeCompare(b.drug_name);  
+  });
+
+  setStatus("loading",  
+    "Generating formatted report...");  
+  generateFormattedExcel(  
+    approvals, fromDate, toDate  
+  );  
+  setStatus("success",  
+    "Downloaded " + approvals.length +  
+    " drug approval(s).");  
+  btn.disabled = false;  
 }
 
 
@@ -896,6 +1002,11 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Total Approvals:</Data></Cell>\n';  
   xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="Number">' +  
     approvals.length + '</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Data Sources:</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="String">OpenFDA API, NIH RxNorm/RxClass API</Data></Cell>\n';  
   xml += '</Row>\n';
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
