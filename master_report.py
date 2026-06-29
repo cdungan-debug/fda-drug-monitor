@@ -925,38 +925,49 @@ def main():
 
     print("Metadata saved: " + meta_path)
 
-    # Create index.html for GitHub Pages  
-    index_html = """<!DOCTYPE html>  
-<html>  
-<head>  
-<title>FDA Master Report</title>  
-<style>  
-body { font-family: Arial; max-width: 600px;  
-  margin: 50px auto; text-align: center; }  
-h1 { color: #0078D4; }  
-.btn { display: inline-block; padding: 15px 40px;  
-  background: #0078D4; color: white;  
-  text-decoration: none; border-radius: 8px;  
-  font-size: 18px; margin: 20px; }  
-.btn:hover { background: #006abc; }  
-.info { color: #666; font-size: 14px; }  
-</style>  
-</head>  
-<body>  
-<h1>FDA Drug Approval Master Report</h1>  
-<p>Northwell Health - Business Operations</p>  
-<a class="btn"  
-  href="FDA_Master_Report.xls"  
-  download>Download Master Report</a>  
-<p class="info">Last updated: """  
-    index_html += today.strftime("%B %d, %Y")  
-    index_html += """<br>  
-Auto-updates daily at 9:00 AM EST</p>  
-</body>  
-</html>"""
+        # Create index.html for GitHub Pages  
+    index_lines = []  
+    index_lines.append("<!DOCTYPE html>")  
+    index_lines.append("<html><head>")  
+    index_lines.append("<title>FDA Master Report</title>")  
+    index_lines.append("<style>")  
+    index_lines.append("body { font-family: Arial; ")  
+    index_lines.append("max-width: 600px; ")  
+    index_lines.append("margin: 50px auto; ")  
+    index_lines.append("text-align: center; }")  
+    index_lines.append("h1 { color: #0078D4; }")  
+    index_lines.append(".btn { display: inline-block; ")  
+    index_lines.append("padding: 15px 40px; ")  
+    index_lines.append("background: #0078D4; ")  
+    index_lines.append("color: white; ")  
+    index_lines.append("text-decoration: none; ")  
+    index_lines.append("border-radius: 8px; ")  
+    index_lines.append("font-size: 18px; ")  
+    index_lines.append("margin: 20px; }")  
+    index_lines.append(".btn:hover { background: #006abc; }")  
+    index_lines.append(".info { color: #666; ")  
+    index_lines.append("font-size: 14px; }")  
+    index_lines.append("</style>")  
+    index_lines.append("</head><body>")  
+    index_lines.append("<h1>FDA Drug Approval ")  
+    index_lines.append("Master Report</h1>")  
+    index_lines.append("<p>Northwell Health - ")  
+    index_lines.append("Business Operations</p>")  
+    index_lines.append('<a class="btn" ')  
+    index_lines.append('href="FDA_Master_Report.xls" ')  
+    index_lines.append('download>Download ')  
+    index_lines.append("Master Report</a>")  
+    index_lines.append('<p class="info">')  
+    index_lines.append("Last updated: ")  
+    index_lines.append(today.strftime("%B %d, %Y"))  
+    index_lines.append("<br>Auto-updates daily ")  
+    index_lines.append("at 9:00 AM EST</p>")  
+    index_lines.append("</body></html>")
+
+    index_html = "\n".join(index_lines)
 
     with open("docs/index.html", "w") as f:  
-        f.write(index_html)
+        f.write(index_html)  
 
     print("GitHub Pages index saved: docs/index.html")  
     print()  
