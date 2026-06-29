@@ -1,0 +1,33 @@
+name: FDA Master Report Daily Update
+
+on:  
+  schedule:  
+    - cron: '0 14 * * *'  
+  workflow_dispatch:
+
+permissions:  
+  contents: write
+
+jobs:  
+  generate-master-report:  
+    runs-on: ubuntu-latest
+
+    steps:  
+      - name: Checkout repository  
+        uses: actions/checkout@v4
+
+      - name: Set up Python  
+        uses: actions/setup-python@v5  
+        with:  
+          python-version: '3.11'
+
+      - name: Generate Master Report  
+        run: python master_report.py
+
+      - name: Commit and push report  
+        run: |  
+          git config user.name "github-actions[bot]"  
+          git config user.email "github-actions[bot]@users.noreply.github.com"  
+          git add docs/  
+          git commit -m "Update FDA Master Report - $(date +'%Y-%m-%d')" || echo "No changes"  
+          git push  
