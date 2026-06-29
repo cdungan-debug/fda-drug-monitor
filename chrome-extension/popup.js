@@ -259,11 +259,7 @@ async function updateMasterSpreadsheet() {
       "Building master spreadsheet..."
     );
 
-    fetchAndDownloadMaster(
-      fromDate,
-      toDate,
-      existingData
-    );
+  fetchAndDownload();
 
   }
   catch(err) {
