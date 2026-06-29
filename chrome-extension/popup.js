@@ -9,8 +9,15 @@ document.addEventListener("DOMContentLoaded", function () {
     formatDateInput(weekAgo);
 
   document.getElementById("downloadBtn")  
-    .addEventListener("click", fetchAndDownload);  
-});
+    .addEventListener("click", fetchAndDownload);
+
+  document.getElementById("masterBtn")  
+    .addEventListener("click", function () {  
+      window.open(  
+        "https://raw.githubusercontent.com/cdungan-debug/fda-drug-monitor/main/docs/FDA_Master_Report.xls"  
+      );  
+    });  
+});  
 
 
 function formatDateInput(date) {  
