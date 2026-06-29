@@ -9,15 +9,8 @@ document.addEventListener("DOMContentLoaded", function () {
     formatDateInput(weekAgo);
 
   document.getElementById("downloadBtn")  
-    .addEventListener("click", fetchAndDownload);
-
-  document.getElementById("masterBtn")  
-    .addEventListener("click", function () {  
-      window.open(  
-        "https://raw.githubusercontent.com/cdungan-debug/fda-drug-monitor/main/docs/FDA_Master_Report.xls"  
-      );  
-    });  
-});  
+    .addEventListener("click", fetchAndDownload);  
+});
 
 
 function formatDateInput(date) {  
@@ -55,7 +48,7 @@ function setStatus(type, message) {
   el.className = "status " + type;  
   if (type === "loading") {  
     el.innerHTML =  
-      '<span class="spinner"></span>' + message;  
+      "" + message;  
   } else {  
     el.innerHTML = message;  
   }  
@@ -63,57 +56,196 @@ function setStatus(type, message) {
 
 
 function fetchIndication(appNumber) {  
-  var url =  
-    "https://api.fda.gov/drug/label.json?" +  
-    "search=openfda.application_number:\"" +  
-    appNumber + "\"&limit=1";
-
-  return fetch(url)  
-    .then(function (response) {  
-      if (!response.ok) return "N/A";  
-      return response.json().then(function (data) {  
-        var results = data.results || [];  
-        if (results.length > 0) {  
-          var label = results[0];  
-          var ind = label.indications_and_usage || [""];  
-          if (ind[0]) {  
-            var text = ind[0];  
-            if (text.length > 500) {  
-              text = text.substring(0, 500) + "...";  
+  return new Promise(function (resolve) {  
+    var url =  
+      "https://api.fda.gov/drug/label.json?search=openfda.application_number:%22" +  
+      appNumber +  
+      "%22&limit=1";  
+    fetch(url)  
+      .then(function (r) {  
+        return r.json();  
+      })  
+      .then(function (data) {  
+        var result = {  
+          indication: "N/A",  
+          pharmClass: ""  
+        };  
+        if (data.results && data.results[0]) {  
+          var label = data.results[0];  
+          if (  
+            label.indications_and_usage &&  
+            label.indications_and_usage[0]  
+          ) {  
+            result.indication = label.indications_and_usage[0];  
+            if (result.indication.length > 500) {  
+              result.indication =  
+                result.indication.substring(0, 500) + "...";  
             }  
-            return text;  
+          } else if (label.purpose && label.purpose[0]) {  
+            result.indication = label.purpose[0];  
           }  
-          var purp = label.purpose || [""];  
-          if (purp[0]) return purp[0];  
+          var of = label.openfda || {};  
+          var classes = [];  
+          if (of.pharm_class_epc) {  
+            classes = classes.concat(of.pharm_class_epc);  
+          }  
+          if (of.pharm_class_moa) {  
+            classes = classes.concat(of.pharm_class_moa);  
+          }  
+          if (of.pharm_class_pe) {  
+            classes = classes.concat(of.pharm_class_pe);  
+          }  
+          result.pharmClass = classes.join("; ");  
         }  
-        return "N/A";  
+        resolve(result);  
+      })  
+      .catch(function () {  
+        resolve({ indication: "N/A", pharmClass: "" });  
       });  
-    })  
-    .catch(function () {  
-      return "N/A";  
-    });  
+  });  
 }
 
 
-function mapIndicationToSpecialty(indication, drugName) {  
-  var text = (indication + " " + drugName).toLowerCase();
+function mapIndicationToSpecialty(indication, drugName, pharmClass) {  
+  var text = (  
+    indication + " " + drugName + " " + (pharmClass || "")  
+  ).toLowerCase();
 
-  var mapping = {  
-    "hypertension": "Cardiologist",  
-    "heart failure": "Cardiologist",  
-    "cardiac": "Cardiologist",  
-    "cardiovascular": "Cardiologist",  
-    "angina": "Cardiologist",  
-    "arrhythmia": "Cardiologist",  
-    "atrial fibrillation": "Cardiologist",  
-    "blood pressure": "Cardiologist",  
-    "cholesterol": "Cardiologist",  
+  var pharmMapping = {  
+    "kinase inhibitor": "Hematology & Oncology (Cancer)",  
+    "antineoplastic": "Hematology & Oncology (Cancer)",  
+    "pd-1": "Hematology & Oncology (Cancer)",  
+    "pd-l1": "Hematology & Oncology (Cancer)",  
+    "her2": "Hematology & Oncology (Cancer)",  
+    "egfr": "Hematology & Oncology (Cancer)",  
+    "vegf": "Hematology & Oncology (Cancer)",  
+    "bcr-abl": "Hematology & Oncology (Cancer)",  
+    "proteasome inhibitor": "Hematology & Oncology (Cancer)",  
+    "cd19": "Hematology & Oncology (Cancer)",  
+    "cd20": "Hematology & Oncology (Cancer)",  
+    "alkylating": "Hematology & Oncology (Cancer)",  
+    "cytotoxic": "Hematology & Oncology (Cancer)",  
+    "topoisomerase inhibitor": "Hematology & Oncology (Cancer)",  
+    "androgen receptor": "Hematology & Oncology (Cancer)",  
+    "estrogen receptor": "Hematology & Oncology (Cancer)",  
+    "aromatase inhibitor": "Hematology & Oncology (Cancer)",  
+    "immunostimulant": "Hematology & Oncology (Cancer)",  
+    "selective serotonin reuptake inhibitor": "Psychiatrist",  
+    "ssri": "Psychiatrist",  
+    "serotonin and norepinephrine reuptake": "Psychiatrist",  
+    "snri": "Psychiatrist",  
+    "atypical antipsychotic": "Psychiatrist",  
+    "typical antipsychotic": "Psychiatrist",  
+    "benzodiazepine": "Psychiatrist",  
+    "dopamine receptor": "Psychiatrist",  
+    "mood stabiliz": "Psychiatrist",  
+    "tricyclic antidepressant": "Psychiatrist",  
+    "anxiolytic": "Psychiatrist",  
+    "angiotensin": "Cardiologist",  
+    "ace inhibitor": "Cardiologist",  
+    "beta-adrenergic blocker": "Cardiologist",  
+    "beta blocker": "Cardiologist",  
+    "calcium channel blocker": "Cardiologist",  
+    "antiarrhythmic": "Cardiologist",  
+    "hmg-coa reductase inhibitor": "Cardiologist",  
     "statin": "Cardiologist",  
     "anticoagulant": "Cardiologist",  
-    "thrombosis": "Cardiologist",  
-    "vascular": "Cardiologist",  
-    "coronary": "Cardiologist",  
-    "myocardial": "Cardiologist",  
+    "factor xa inhibitor": "Cardiologist",  
+    "thrombin inhibitor": "Cardiologist",  
+    "antiplatelet": "Cardiologist",  
+    "vasodilator": "Cardiologist",  
+    "diuretic": "Cardiologist",  
+    "cardiac glycoside": "Cardiologist",  
+    "proton pump inhibitor": "Internal Medicine",  
+    "h2 receptor antagonist": "Internal Medicine",  
+    "antacid": "Internal Medicine",  
+    "laxative": "Internal Medicine",  
+    "antiemetic": "Internal Medicine",  
+    "5-ht3 receptor antagonist": "Internal Medicine",  
+    "aminosalicylate": "Internal Medicine",  
+    "tnf blocker": "Rheumatologist",  
+    "interleukin inhibitor": "Rheumatologist",  
+    "il-6": "Rheumatologist",  
+    "il-17": "Rheumatologist",  
+    "il-23": "Rheumatologist",  
+    "janus kinase inhibitor": "Rheumatologist",  
+    "jak inhibitor": "Rheumatologist",  
+    "disease-modifying": "Rheumatologist",  
+    "immunomodulator": "Rheumatologist",  
+    "nonsteroidal anti-inflammatory": "Rheumatologist",  
+    "nsaid": "Rheumatologist",  
+    "cox-2": "Rheumatologist",  
+    "corticosteroid": "Pulmonologist",  
+    "beta2-adrenergic agonist": "Pulmonologist",  
+    "beta-2 agonist": "Pulmonologist",  
+    "bronchodilator": "Pulmonologist",  
+    "leukotriene receptor antagonist": "Pulmonologist",  
+    "muscarinic antagonist": "Pulmonologist",  
+    "phosphodiesterase": "Pulmonologist",  
+    "cftr": "Pulmonologist",  
+    "anticonvulsant": "Vascular Neurology",  
+    "antiepileptic": "Vascular Neurology",  
+    "dopamine precursor": "Vascular Neurology",  
+    "cholinesterase inhibitor": "Vascular Neurology",  
+    "nmda receptor antagonist": "Vascular Neurology",  
+    "gaba": "Vascular Neurology",  
+    "sodium channel": "Vascular Neurology",  
+    "cgrp": "Vascular Neurology",  
+    "insulin": "Endocrinologist",  
+    "sulfonylurea": "Endocrinologist",  
+    "biguanide": "Endocrinologist",  
+    "sglt2 inhibitor": "Endocrinologist",  
+    "glp-1 receptor agonist": "Endocrinologist",  
+    "dpp-4 inhibitor": "Endocrinologist",  
+    "thiazolidinedione": "Endocrinologist",  
+    "thyroid": "Endocrinologist",  
+    "bisphosphonate": "Endocrinologist",  
+    "glucocorticoid": "Endocrinologist",  
+    "incretin": "Endocrinologist",  
+    "nucleoside reverse transcriptase": "Infectious Disease",  
+    "protease inhibitor": "Infectious Disease",  
+    "integrase inhibitor": "Infectious Disease",  
+    "non-nucleoside reverse transcriptase": "Infectious Disease",  
+    "neuraminidase inhibitor": "Infectious Disease",  
+    "cephalosporin": "Infectious Disease",  
+    "penicillin": "Infectious Disease",  
+    "fluoroquinolone": "Infectious Disease",  
+    "macrolide": "Infectious Disease",  
+    "tetracycline": "Infectious Disease",  
+    "carbapenem": "Infectious Disease",  
+    "aminoglycoside": "Infectious Disease",  
+    "antifungal": "Infectious Disease",  
+    "azole antifungal": "Infectious Disease",  
+    "antimalarial": "Infectious Disease",  
+    "antiretroviral": "Infectious Disease",  
+    "prostaglandin analog": "Vision Care",  
+    "carbonic anhydrase inhibitor": "Vision Care",  
+    "ophthalmic": "Vision Care",  
+    "calcineurin inhibitor": "Transplant",  
+    "mtor inhibitor": "Transplant",  
+    "erythropoiesis-stimulating": "Dialysis",  
+    "phosphate binder": "Dialysis",  
+    "opioid agonist": "Rehabilitation",  
+    "opioid antagonist": "Behavioral Health",  
+    "opioid": "Rehabilitation",  
+    "local anesthetic": "Anesthesiology",  
+    "general anesthetic": "Anesthesiology",  
+    "neuromuscular block": "Anesthesiology",  
+    "antihistamine": "Internal Medicine",  
+    "h1 receptor antagonist": "Internal Medicine",  
+    "erythropoietin": "Hematology & Oncology (Cancer)",  
+    "colony stimulating factor": "Hematology & Oncology (Cancer)",  
+    "thrombopoietin": "Hematology & Oncology (Cancer)",  
+    "growth factor": "Hematology & Oncology (Cancer)"  
+  };
+
+  for (var pharmKey in pharmMapping) {  
+    if (text.indexOf(pharmKey) !== -1) {  
+      return pharmMapping[pharmKey];  
+    }  
+  }
+
+  var keywordMapping = {  
     "cancer": "Hematology & Oncology (Cancer)",  
     "tumor": "Hematology & Oncology (Cancer)",  
     "carcinoma": "Hematology & Oncology (Cancer)",  
@@ -126,22 +258,29 @@ function mapIndicationToSpecialty(indication, drugName) {
     "myeloma": "Hematology & Oncology (Cancer)",  
     "anemia": "Hematology & Oncology (Cancer)",  
     "hemophilia": "Hematology & Oncology (Cancer)",  
-    "platelet": "Hematology & Oncology (Cancer)",  
-    "blood disorder": "Hematology & Oncology (Cancer)",  
     "sickle cell": "Hematology & Oncology (Cancer)",  
     "neutropenia": "Hematology & Oncology (Cancer)",  
     "chemotherapy": "Medical Oncologist",  
-    "radiation therapy": "Medical Oncologist",  
-    "antineoplastic": "Medical Oncologist",  
     "gynecologic cancer": "Gynecologic Oncologist",  
     "ovarian cancer": "Gynecologic Oncologist",  
     "cervical cancer": "Gynecologic Oncologist",  
     "uterine cancer": "Gynecologic Oncologist",  
     "endometrial cancer": "Gynecologic Oncologist",  
+    "hypertension": "Cardiologist",  
+    "heart failure": "Cardiologist",  
+    "cardiac": "Cardiologist",  
+    "cardiovascular": "Cardiologist",  
+    "angina": "Cardiologist",  
+    "arrhythmia": "Cardiologist",  
+    "atrial fibrillation": "Cardiologist",  
+    "blood pressure": "Cardiologist",  
+    "cholesterol": "Cardiologist",  
+    "thrombosis": "Cardiologist",  
+    "coronary": "Cardiologist",  
+    "myocardial": "Cardiologist",  
     "seizure": "Vascular Neurology",  
     "epilepsy": "Vascular Neurology",  
     "neurological": "Vascular Neurology",  
-    "anticonvulsant": "Vascular Neurology",  
     "multiple sclerosis": "Vascular Neurology",  
     "parkinson": "Vascular Neurology",  
     "migraine": "Vascular Neurology",  
@@ -153,20 +292,15 @@ function mapIndicationToSpecialty(indication, drugName) {
     "traumatic brain": "Brain Injury Medicine",  
     "concussion": "Brain Injury Medicine",  
     "spinal cord": "Spinal Cord Injury Medicine",  
-    "paraplegia": "Spinal Cord Injury Medicine",  
-    "quadriplegia": "Spinal Cord Injury Medicine",  
     "schizophrenia": "Psychiatrist",  
     "bipolar": "Psychiatrist",  
-    "antipsychotic": "Psychiatrist",  
     "depression": "Psychiatrist",  
     "anxiety": "Psychiatrist",  
-    "antidepressant": "Psychiatrist",  
     "insomnia": "Psychiatrist",  
     "adhd": "Psychiatrist",  
     "ptsd": "Psychiatrist",  
-    "obsessive": "Psychiatrist",  
     "psychosis": "Psychiatrist",  
-    "behavioral health": "Behavioral Health",  
+    "obsessive": "Psychiatrist",  
     "substance abuse": "Behavioral Health",  
     "addiction": "Behavioral Health",  
     "opioid use disorder": "Behavioral Health",  
@@ -178,11 +312,8 @@ function mapIndicationToSpecialty(indication, drugName) {
     "pulmonary": "Pulmonologist",  
     "respiratory": "Pulmonologist",  
     "bronchitis": "Pulmonologist",  
-    "inhaler": "Pulmonologist",  
     "cystic fibrosis": "Pulmonologist",  
     "emphysema": "Pulmonologist",  
-    "respiratory therapy": "Respiratory Therapy",  
-    "ventilator": "Respiratory Therapy",  
     "arthritis": "Rheumatologist",  
     "rheumatoid": "Rheumatologist",  
     "lupus": "Rheumatologist",  
@@ -193,13 +324,10 @@ function mapIndicationToSpecialty(indication, drugName) {
     "ankylosing": "Rheumatologist",  
     "vasculitis": "Rheumatologist",  
     "glaucoma": "Vision Care",  
-    "ophthalmic": "Vision Care",  
     "retinal": "Vision Care",  
     "macular": "Vision Care",  
-    "eye drops": "Vision Care",  
     "cataract": "Vision Care",  
     "ocular": "Vision Care",  
-    "optic": "Vision Care",  
     "conjunctivitis": "Vision Care",  
     "liver": "Hepatology",  
     "hepatic": "Hepatology",  
@@ -211,17 +339,14 @@ function mapIndicationToSpecialty(indication, drugName) {
     "crohn": "Internal Medicine",  
     "colitis": "Internal Medicine",  
     "constipation": "Internal Medicine",  
-    "gastric": "Internal Medicine",  
     "reflux": "Internal Medicine",  
     "irritable bowel": "Internal Medicine",  
     "colon": "Colon & Rectal Surgery",  
     "rectal": "Colon & Rectal Surgery",  
     "colorectal": "Colon & Rectal Surgery",  
-    "hemorrhoid": "Colon & Rectal Surgery",  
     "renal": "Dialysis",  
     "kidney": "Dialysis",  
     "dialysis": "Dialysis",  
-    "nephritis": "Dialysis",  
     "nephrotic": "Dialysis",  
     "diabetes": "Endocrinologist",  
     "thyroid": "Endocrinologist",  
@@ -230,57 +355,40 @@ function mapIndicationToSpecialty(indication, drugName) {
     "insulin": "Endocrinologist",  
     "glucose": "Endocrinologist",  
     "adrenal": "Endocrinologist",  
-    "pituitary": "Endocrinologist",  
     "metabolic": "Endocrinologist",  
     "fertility": "Reproductive Endocrinologist",  
-    "ivf": "Reproductive Endocrinologist",  
-    "assisted reproduction": "Reproductive Endocrinologist",  
     "infertility": "Reproductive Endocrinologist",  
     "infection": "Infectious Disease",  
     "antibacterial": "Infectious Disease",  
     "antiviral": "Infectious Disease",  
     "antibiotic": "Infectious Disease",  
-    "antifungal": "Infectious Disease",  
     "hiv": "Infectious Disease",  
     "pneumonia": "Infectious Disease",  
     "sepsis": "Infectious Disease",  
     "tuberculosis": "Infectious Disease",  
-    "mrsa": "Infectious Disease",  
-    "hepatitis c": "Infectious Disease",  
-    "hepatitis b": "Infectious Disease",  
     "influenza": "Infectious Disease",  
     "covid": "Infectious Disease",  
     "transfusion": "Blood Banking & Transfusion Medicine",  
-    "blood bank": "Blood Banking & Transfusion Medicine",  
     "prostate": "Urologist",  
     "bladder": "Urologist",  
     "urinary": "Urologist",  
     "erectile": "Urologist",  
     "kidney stone": "Urologist",  
-    "urologic": "Urologist",  
-    "benign prostatic": "Urologist",  
     "orthopedic": "Orthopedic Surgeon",  
     "bone": "Orthopedic Surgeon",  
     "fracture": "Orthopedic Surgeon",  
     "joint": "Orthopedic Surgeon",  
-    "arthroplasty": "Orthopedic Surgeon",  
     "musculoskeletal": "Neuromusculoskeletal Medicine",  
     "pregnancy": "Gynecologist",  
     "contracepti": "Gynecologist",  
-    "estradiol": "Gynecologist",  
     "menopausal": "Gynecologist",  
     "prenatal": "Gynecologist",  
-    "obstetric": "Gynecologist",  
     "endometriosis": "Gynecologist",  
     "menstrual": "Gynecologist",  
-    "midwife": "Certified Nurse Midwife",  
-    "lactation": "Family Medicine",  
     "anesthetic": "Anesthesiology",  
     "sedation": "Anesthesiology",  
     "anesthesia": "Anesthesiology",  
-    "neuromuscular block": "Anesthesiology",  
     "allergy": "Internal Medicine",  
-    "immunotherapy": "Hematology & Oncology (Cancer)",  
     "histamine": "Internal Medicine",  
     "contrast": "Diagnostic Imaging Center",  
     "imaging": "Diagnostic Imaging Center",  
@@ -300,85 +408,58 @@ function mapIndicationToSpecialty(indication, drugName) {
     "tinnitus": "ENT",  
     "ear infection": "ENT",  
     "throat": "ENT",  
-    "sinus": "ENT",  
     "otitis": "ENT",  
-    "laryngeal": "ENT",  
-    "sports injury": "Sports Medicine",  
-    "athletic": "Sports Medicine",  
     "bariatric": "Bariatric Medicine",  
     "weight loss": "Bariatric Medicine",  
     "obesity": "Bariatric Medicine",  
     "hospice": "Hospice and Palliative Medicine",  
     "palliative": "Hospice and Palliative Medicine",  
-    "end of life": "Hospice and Palliative Medicine",  
     "transplant": "Transplant",  
-    "organ transplant": "Transplant",  
     "immunosuppressant": "Transplant",  
     "graft": "Transplant",  
     "critical care": "Critical Care Medicine",  
     "icu": "Critical Care Medicine",  
-    "intensive care": "Critical Care Medicine",  
     "toxic": "Medical Toxicology",  
     "poison": "Medical Toxicology",  
     "antidote": "Medical Toxicology",  
     "genetic": "Genetics",  
     "gene therapy": "Genetics",  
     "hereditary": "Genetics",  
-    "crispr": "Genetics",  
     "vaccine": "Preventive Medicine",  
     "prophylaxis": "Preventive Medicine",  
-    "prevention": "Preventive Medicine",  
     "infusion": "Infusion Medicine",  
     "intravenous": "Infusion Medicine",  
     "oral surgery": "Oral and Maxillofacial Surgeon",  
     "dental": "Oral and Maxillofacial Surgeon",  
-    "maxillofacial": "Oral and Maxillofacial Surgeon",  
-    "orthodontic": "Orthodontist",  
-    "prosthetic": "Orthotics and Prosthetics",  
-    "orthotic": "Orthotics and Prosthetics",  
-    "electrodiagnostic": "Electrodiagnostic Medicine",  
-    "emg": "Electrodiagnostic Medicine",  
     "rehabilitation": "Rehabilitation",  
     "physical therapy": "Rehabilitation",  
     "pain": "Rehabilitation",  
     "analgesic": "Rehabilitation",  
+    "sports injury": "Sports Medicine",  
+    "athletic": "Sports Medicine",  
     "acne": "Family Medicine",  
     "dermatitis": "Family Medicine",  
     "eczema": "Family Medicine",  
-    "rosacea": "Family Medicine",  
     "skin": "Family Medicine",  
     "topical": "Family Medicine",  
     "wound": "General Surgeon",  
     "surgical": "General Surgeon",  
-    "hernia": "General Surgeon",  
-    "hospitalist": "Hospitalist",  
-    "inpatient": "Hospitalist",  
-    "audiolog": "Audiologist",  
     "speech": "Speech Therapy",  
     "swallowing": "Speech Therapy",  
-    "occupational therap": "Rehabilitation",  
-    "dietar": "Family Medicine",  
-    "nutrition": "Family Medicine",  
-    "urgent care": "Urgent Care Center",  
+    "audiolog": "Audiologist",  
     "chiropractic": "Chiropractor",  
-    "spinal manipulation": "Chiropractor",  
-    "acupuncture": "Family Medicine",  
     "counseling": "Counselor",  
-    "psychotherap": "Psychologist",  
     "neuropsychol": "Neuropsychology",  
-    "social work": "Behavioral Health",  
-    "home health": "Home Health",  
-    "nursing": "Family Medicine",  
-    "nurse practitioner": "Nurse Practitioner",  
+    "home health": "Home Health"  
   };
 
-  for (var keyword in mapping) {  
+  for (var keyword in keywordMapping) {  
     if (text.indexOf(keyword) !== -1) {  
-      return mapping[keyword];  
+      return keywordMapping[keyword];  
     }  
   }  
   return "General Practice";  
-}  
+}
 
 
 function escapeXml(str) {  
@@ -402,7 +483,7 @@ function escapeXml(str) {
     }  
   }  
   return out.join("");  
-}  
+}
 
 
 function fetchAndDownload() {  
@@ -556,6 +637,7 @@ function fetchAndDownload() {
             route: route,  
             active_ingredients: ingredients,  
             indication: "",  
+            pharmClass: "",  
             specialty: ""  
           });  
         }  
@@ -593,13 +675,16 @@ function fetchAndDownload() {
           indMap[appKeys[x]] = indResults[x];  
         }  
         for (var b = 0; b < approvals.length; b++) {  
-          var ind =  
+          var result =  
             indMap[approvals[b].application_number]  
-            || "N/A";  
-          approvals[b].indication = ind;  
+            || { indication: "N/A", pharmClass: "" };  
+          approvals[b].indication = result.indication;  
+          approvals[b].pharmClass = result.pharmClass;  
           approvals[b].specialty =  
             mapIndicationToSpecialty(  
-              ind, approvals[b].drug_name  
+              result.indication,  
+              approvals[b].drug_name,  
+              result.pharmClass  
             );  
         }
 
@@ -633,7 +718,6 @@ function fetchAndDownload() {
 
 function generateFormattedExcel(approvals, fromDate,  
                                  toDate) {  
-  // Count by type and specialty  
   var typeCounts = {};  
   var specCounts = {};  
   var sponsorCounts = {};
@@ -660,37 +744,32 @@ function generateFormattedExcel(approvals, fromDate,
     }  
   );
 
-  // Build XML Spreadsheet  
-  var xml = '<?xml version="1.0" encoding="UTF-8"?>\n';  
+  var xml = "";  
+  xml += '<?xml version="1.0" encoding="UTF-8"?>\n';  
   xml += '<?mso-application progid="Excel.Sheet"?>\n';  
   xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';  
   xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n';  
   xml += ' xmlns:x="urn:schemas-microsoft-com:office:excel">\n';
 
-  // ---- STYLES ----  
   xml += '<Styles>\n';
 
-  // Default  
   xml += '<Style ss:ID="Default" ss:Name="Normal">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
   xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
   xml += '</Style>\n';
 
-  // Title - big blue header  
   xml += '<Style ss:ID="title">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="18" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
   xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
   xml += '</Style>\n';
 
-  // Subtitle  
   xml += '<Style ss:ID="subtitle">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="12" ss:Color="#FFFFFF"/>\n';  
   xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
   xml += '</Style>\n';
 
-  // Section header  
   xml += '<Style ss:ID="section">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="13" ss:Bold="1" ss:Color="#0078D4"/>\n';  
   xml += '  <Borders>\n';  
@@ -699,7 +778,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
   xml += '</Style>\n';
 
-  // Column header - dark blue  
   xml += '<Style ss:ID="header">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
   xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
@@ -711,7 +789,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Data row - white  
   xml += '<Style ss:ID="data">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
   xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
@@ -722,7 +799,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Data row - alternating grey  
   xml += '<Style ss:ID="dataAlt">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
   xml += '  <Interior ss:Color="#F2F7FC" ss:Pattern="Solid"/>\n';  
@@ -734,7 +810,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Drug name bold  
   xml += '<Style ss:ID="drugName">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>\n';  
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
@@ -745,7 +820,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Drug name bold alt  
   xml += '<Style ss:ID="drugNameAlt">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>\n';  
   xml += '  <Interior ss:Color="#F2F7FC" ss:Pattern="Solid"/>\n';  
@@ -757,19 +831,16 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Info label bold  
   xml += '<Style ss:ID="infoLabel">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#555555"/>\n';  
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
   xml += '</Style>\n';
 
-  // Info value  
   xml += '<Style ss:ID="infoValue">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#333333"/>\n';  
   xml += '  <Alignment ss:Vertical="Center"/>\n';  
   xml += '</Style>\n';
 
-  // Count number  
   xml += '<Style ss:ID="countNum">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
   xml += '  <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>\n';  
@@ -778,7 +849,6 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '  </Borders>\n';  
   xml += '</Style>\n';
 
-  // Specialty group header  
   xml += '<Style ss:ID="specGroup">\n';  
   xml += '  <Font ss:FontName="Calibri" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
   xml += '  <Interior ss:Color="#28A745" ss:Pattern="Solid"/>\n';  
@@ -787,15 +857,12 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '</Styles>\n';
 
-  // =========================================  
   // SHEET 1: SUMMARY  
-  // =========================================  
   xml += '<Worksheet ss:Name="Summary">\n';  
   xml += '<Table ss:DefaultRowHeight="20">\n';  
   xml += '<Column ss:Width="200"/>\n';  
   xml += '<Column ss:Width="300"/>\n';
 
-  // Title  
   xml += '<Row ss:Height="40">\n';  
   xml += '  <Cell ss:StyleID="title" ss:MergeAcross="1">';  
   xml += '<Data ss:Type="String">FDA Drug Approval Report</Data></Cell>\n';  
@@ -808,7 +875,6 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
 
-  // Info rows  
   xml += '<Row>\n';  
   xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Report Generated:</Data></Cell>\n';  
   xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="String">' +  
@@ -834,7 +900,6 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
 
-  // By Type  
   xml += '<Row>\n';  
   xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
   xml += '<Data ss:Type="String">Approvals by Submission Type</Data></Cell>\n';  
@@ -856,14 +921,13 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
 
-  // By Specialty  
   xml += '<Row>\n';  
   xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
-  xml += '<Data ss:Type="String">Approvals by Specialty</Data></Cell>\n';  
+  xml += '<Data ss:Type="String">Approvals by Northwell Specialty</Data></Cell>\n';  
   xml += '</Row>\n';
 
   xml += '<Row>\n';  
-  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Specialty</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Northwell Specialty</Data></Cell>\n';  
   xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Count</Data></Cell>\n';  
   xml += '</Row>\n';
 
@@ -878,7 +942,6 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
 
-  // Top Sponsors  
   xml += '<Row>\n';  
   xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
   xml += '<Data ss:Type="String">Top Sponsors</Data></Cell>\n';  
@@ -901,25 +964,22 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '</Table>\n</Worksheet>\n';
 
-  // =========================================  
   // SHEET 2: ALL APPROVALS  
-  // =========================================  
   xml += '<Worksheet ss:Name="All Approvals">\n';  
   xml += '<Table ss:DefaultRowHeight="22">\n';  
-  xml += '<Column ss:Width="30"/>\n';   // #  
-  xml += '<Column ss:Width="150"/>\n';  // Drug  
-  xml += '<Column ss:Width="180"/>\n';  // Generic  
-  xml += '<Column ss:Width="130"/>\n';  // Specialty  
-  xml += '<Column ss:Width="90"/>\n';   // Date  
-  xml += '<Column ss:Width="140"/>\n';  // Type  
-  xml += '<Column ss:Width="170"/>\n';  // Sponsor  
-  xml += '<Column ss:Width="110"/>\n';  // App#  
-  xml += '<Column ss:Width="120"/>\n';  // Dosage  
-  xml += '<Column ss:Width="80"/>\n';   // Route  
-  xml += '<Column ss:Width="250"/>\n';  // Ingredients  
-  xml += '<Column ss:Width="400"/>\n';  // Indication
+  xml += '<Column ss:Width="30"/>\n';  
+  xml += '<Column ss:Width="150"/>\n';  
+  xml += '<Column ss:Width="180"/>\n';  
+  xml += '<Column ss:Width="130"/>\n';  
+  xml += '<Column ss:Width="90"/>\n';  
+  xml += '<Column ss:Width="140"/>\n';  
+  xml += '<Column ss:Width="170"/>\n';  
+  xml += '<Column ss:Width="110"/>\n';  
+  xml += '<Column ss:Width="120"/>\n';  
+  xml += '<Column ss:Width="80"/>\n';  
+  xml += '<Column ss:Width="250"/>\n';  
+  xml += '<Column ss:Width="400"/>\n';
 
-  // Title row  
   xml += '<Row ss:Height="35">\n';  
   xml += '  <Cell ss:StyleID="title" ss:MergeAcross="11">';  
   xml += '<Data ss:Type="String">FDA Drug Approvals - ' +  
@@ -928,10 +988,9 @@ function generateFormattedExcel(approvals, fromDate,
     '</Data></Cell>\n';  
   xml += '</Row>\n';
 
-  // Header row  
   xml += '<Row ss:Height="30">\n';  
   var headers = ["#", "Drug Name", "Generic Name",  
-    "Specialty", "Approval Date", "Submission Type",  
+    "Northwell Specialty", "Approval Date", "Submission Type",  
     "Sponsor", "Application #", "Dosage Form",  
     "Route", "Active Ingredients",  
     "Indication / Use"];  
@@ -943,7 +1002,6 @@ function generateFormattedExcel(approvals, fromDate,
   }  
   xml += '</Row>\n';
 
-  // Data rows  
   for (var d = 0; d < approvals.length; d++) {  
     var app = approvals[d];  
     var isAlt = d % 2 === 1;  
@@ -1003,9 +1061,7 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '</Table>\n</Worksheet>\n';
 
-  // =========================================  
   // SHEET 3: BY SPECIALTY  
-  // =========================================  
   xml += '<Worksheet ss:Name="By Specialty">\n';  
   xml += '<Table ss:DefaultRowHeight="22">\n';  
   xml += '<Column ss:Width="150"/>\n';  
@@ -1017,7 +1073,7 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row ss:Height="35">\n';  
   xml += '  <Cell ss:StyleID="title" ss:MergeAcross="5">';  
-  xml += '<Data ss:Type="String">Approvals Grouped by Specialty</Data></Cell>\n';  
+  xml += '<Data ss:Type="String">Approvals Grouped by Northwell Specialty</Data></Cell>\n';  
   xml += '</Row>\n';
 
   for (var sk = 0; sk < specKeys.length; sk++) {  
@@ -1087,7 +1143,6 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '</Workbook>';
 
-  // Download  
   var blob = new Blob([xml], {  
     type: "application/vnd.ms-excel"  
   });  
