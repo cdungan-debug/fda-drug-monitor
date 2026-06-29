@@ -581,7 +581,7 @@ function generateFormattedExcel(approvals, fromDate,
 
   xml += '<Row ss:Height="25">\n';  
   xml += '  <Cell ss:StyleID="subtitle" ss:MergeAcross="1">';  
-  xml += '<Data ss:Type="String">Northwell Health — Business Operations</Data></Cell>\n';  
+  xml += '<Data ss:Type="String">Northwell Health - Business Operations</Data></Cell>\n';  
   xml += '</Row>\n';
 
   xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
@@ -700,7 +700,7 @@ function generateFormattedExcel(approvals, fromDate,
   // Title row  
   xml += '<Row ss:Height="35">\n';  
   xml += '  <Cell ss:StyleID="title" ss:MergeAcross="11">';  
-  xml += '<Data ss:Type="String">FDA Drug Approvals — ' +  
+  xml += '<Data ss:Type="String">FDA Drug Approvals - ' +  
     escapeXml(formatDateDisplay(fromDate)) + ' to ' +  
     escapeXml(formatDateDisplay(toDate)) +  
     '</Data></Cell>\n';  
