@@ -161,13 +161,14 @@ function mapIndicationToSpecialty(indication, drugName) {
 
 function escapeXml(str) {  
   if (!str) return "";  
-  return str  
-    .replace(/&/g, "&")  
-    .replace(/</g, "<")  
-    .replace(/>/g, ">")  
-    .replace(/"/g, """)  
-    .replace(/'/g, "'");  
-}
+  var result = String(str);  
+  result = result.split("&").join("&");  
+  result = result.split("<").join("<");  
+  result = result.split(">").join(">");  
+  result = result.split('"').join(""");  
+  result = result.split("'").join("'");  
+  return result;  
+}  
 
 
 function fetchAndDownload() {  
