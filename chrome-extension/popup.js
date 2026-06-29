@@ -162,12 +162,24 @@ function mapIndicationToSpecialty(indication, drugName) {
 function escapeXml(str) {  
   if (!str) return "";  
   var result = String(str);  
-  result = result.split("&").join("&");  
-  result = result.split("<").join("<");  
-  result = result.split(">").join(">");  
-  result = result.split('"').join(""");  
-  result = result.split("'").join("'");  
-  return result;  
+  var out = "";  
+  for (var i = 0; i < result.length; i++) {  
+    var c = result.charCodeAt(i);  
+    if (c === 38) {  
+      out += "&";  
+    } else if (c === 60) {  
+      out += "<";  
+    } else if (c === 62) {  
+      out += ">";  
+    } else if (c === 34) {  
+      out += """;  
+    } else if (c === 39) {  
+      out += "'";  
+    } else {  
+      out += result.charAt(i);  
+    }  
+  }  
+  return out;  
 }  
 
 
