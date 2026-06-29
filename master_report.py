@@ -1,12 +1,4 @@
-"""  
-FDA Master Report Generator  
-Runs daily via GitHub Actions at 9am EST  
-Fetches ALL FDA drug approvals for the last 2 years  
-Generates a formatted Excel XML file  
-"""
-
 import urllib.request  
-import urllib.parse  
 import json  
 import time  
 import os  
@@ -144,8 +136,7 @@ SPECIALTY_MAP = {
 
 
 def map_specialty(indication, drug_name):  
-    text = (str(indication) + " " +  
-            str(drug_name)).lower()  
+    text = (str(indication) + " " + str(drug_name)).lower()  
     for keyword, specialty in SPECIALTY_MAP.items():  
         if keyword in text:  
             return specialty  
@@ -156,44 +147,36 @@ def escape_xml(s):
     if not s:  
         return ""  
     s = str(s)  
-    s = s.replace("&", "&")  
-    s = s.replace("<", "<")  
-    s = s.replace(">", ">")  
-    s = s.replace('"', """)  
-    s = s.replace("'", "'")  
+    s = s.replace(chr(38), chr(38) + "amp;")  
+    s = s.replace(chr(60), chr(38) + "lt;")  
+    s = s.replace(chr(62), chr(38) + "gt;")  
+    s = s.replace(chr(34), chr(38) + "quot;")  
+    s = s.replace(chr(39), chr(38) + "apos;")  
     return s
 
 
-def fetch_fda_page(date_from, date_to, skip, limit):  
-    url = (  
-        "https://api.fda.gov/drug/drugsfda.json?"  
-        "search=submissions.submission_status_date:"  
-        "[" + date_from + "+TO+" + date_to + "]"  
-        "&limit=" + str(limit) +  
-        "&skip=" + str(skip)  
-    )  
+def fetch_url(url):  
     try:  
         req = urllib.request.Request(url)  
         req.add_header("User-Agent", "FDA-Monitor/1.0")  
         resp = urllib.request.urlopen(req, timeout=30)  
-        data = json.loads(resp.read().decode("utf-8"))  
-        return data  
+        return json.loads(resp.read().decode("utf-8"))  
     except urllib.error.HTTPError as e:  
         if e.code == 404:  
             return None  
-        print("  HTTP Error " + str(e.code) +  
-              " at skip=" + str(skip))  
+        print("HTTP Error " + str(e.code))  
         return None  
     except Exception as e:  
-        print("  Error: " + str(e))  
+        print("Error: " + str(e))  
         return None
 
 
 def fetch_indication(app_number):  
     url = (  
         "https://api.fda.gov/drug/label.json?"  
-        "search=openfda.application_number:%22" +  
-        str(app_number) + "%22&limit=1"  
+        "search=openfda.application_number:%22"  
+        + str(app_number)  
+        + "%22&limit=1"  
     )  
     try:  
         req = urllib.request.Request(url)  
@@ -203,9 +186,7 @@ def fetch_indication(app_number):
         results = data.get("results", [])  
         if results:  
             label = results[0]  
-            ind = label.get(  
-                "indications_and_usage", [""]  
-            )  
+            ind = label.get("indications_and_usage", [""])  
             if ind and ind[0]:  
                 text = ind[0]  
                 if len(text) > 500:  
@@ -222,62 +203,48 @@ def fetch_indication(app_number):
 def main():  
     print("=" * 60)  
     print("FDA MASTER REPORT GENERATOR")  
-    print("Run: " + datetime.now().strftime(  
-        "%Y-%m-%d %H:%M:%S"  
-    ))  
     print("=" * 60)
 
-    # Calculate date range (last 2 years)  
     today = datetime.now()  
     two_years_ago = today - timedelta(days=730)  
     date_from = two_years_ago.strftime("%Y%m%d")  
     date_to = today.strftime("%Y%m%d")
 
-    print("Date range: " + date_from + " to " + date_to)  
-    print()
+    print("Date range: " + date_from + " to " + date_to)
 
-    # Fetch all approvals with pagination  
     all_results = []  
     skip = 0  
-    limit = 100  
-    max_pages = 50
+    limit = 100
 
-    for page in range(max_pages):  
-        print("Fetching page " + str(page + 1) +  
-              " (skip=" + str(skip) + ")...")  
-        data = fetch_fda_page(  
-            date_from, date_to, skip, limit  
-        )
+    for page in range(50):  
+        print("Fetching page " + str(page + 1) + "...")  
+        url = (  
+            "https://api.fda.gov/drug/drugsfda.json?"  
+            "search=submissions.submission_status_date:"  
+            "[" + date_from + "+TO+" + date_to + "]"  
+            "&limit=" + str(limit)  
+            + "&skip=" + str(skip)  
+        )  
+        data = fetch_url(url)
 
         if not data:  
-            print("  No more results.")  
             break
 
         results = data.get("results", [])  
         if not results:  
-            print("  Empty page.")  
             break
 
         all_results.extend(results)  
-        total = data.get("meta", {}).get(  
-            "results", {}  
-        ).get("total", 0)
-
-        print("  Got " + str(len(results)) +  
-              " results. Total available: " +  
-              str(total))
+        total = data.get("meta", {}).get("results", {}).get("total", 0)  
+        print("  Got " + str(len(results)) + " of " + str(total))
 
         skip += limit  
         if skip >= total:  
-            break
-
+            break  
         time.sleep(0.3)
 
-    print()  
-    print("Total raw results: " +  
-          str(len(all_results)))
+    print("Total raw results: " + str(len(all_results)))
 
-    # Parse approvals  
     approvals = []  
     seen = {}
 
@@ -285,25 +252,18 @@ def main():
         submissions = drug.get("submissions", [])  
         products = drug.get("products", [])  
         openfda = drug.get("openfda", {})  
-        app_num = drug.get(  
-            "application_number", "Unknown"  
-        )
+        app_num = drug.get("application_number", "Unknown")
 
         for sub in submissions:  
-            sub_date = sub.get(  
-                "submission_status_date", ""  
-            )  
-            sub_status = sub.get(  
-                "submission_status", ""  
-            )
+            sub_date = sub.get("submission_status_date", "")  
+            sub_status = sub.get("submission_status", "")
 
             if not sub_date or sub_status != "AP":  
                 continue
 
             try:  
                 sub_int = int(sub_date)  
-                if (sub_int < int(date_from) or  
-                        sub_int > int(date_to)):  
+                if sub_int < int(date_from) or sub_int > int(date_to):  
                     continue  
             except ValueError:  
                 continue
@@ -319,46 +279,27 @@ def main():
             ingredients = "N/A"
 
             if products:  
-                drug_name = products[0].get(  
-                    "brand_name", "Unknown"  
-                )  
-                dosage_form = products[0].get(  
-                    "dosage_form", "Unknown"  
-                )  
-                route = products[0].get(  
-                    "route", "Unknown"  
-                )  
-                ais = products[0].get(  
-                    "active_ingredients", []  
-                )  
+                drug_name = products[0].get("brand_name", "Unknown")  
+                dosage_form = products[0].get("dosage_form", "Unknown")  
+                route = products[0].get("route", "Unknown")  
+                ais = products[0].get("active_ingredients", [])  
                 if ais:  
                     parts = []  
                     for ai in ais:  
-                        name = ai.get(  
-                            "name", "Unknown"  
-                        )  
-                        strength = ai.get(  
-                            "strength", ""  
-                        )  
+                        name = ai.get("name", "Unknown")  
+                        strength = ai.get("strength", "")  
                         if strength:  
-                            parts.append(  
-                                name + " (" +  
-                                strength + ")"  
-                            )  
+                            parts.append(name + " (" + strength + ")")  
                         else:  
                             parts.append(name)  
                     ingredients = "; ".join(parts)
 
             generic = "Unknown"  
-            g_names = openfda.get(  
-                "generic_name", []  
-            )  
+            g_names = openfda.get("generic_name", [])  
             if g_names:  
                 generic = g_names[0]
 
-            sub_type = sub.get(  
-                "submission_type", "Unknown"  
-            )  
+            sub_type = sub.get("submission_type", "Unknown")  
             type_desc = sub_type  
             if sub_type == "ORIG":  
                 type_desc = "New Drug Application"  
@@ -370,9 +311,9 @@ def main():
             date_display = sub_date  
             if len(sub_date) == 8:  
                 date_display = (  
-                    sub_date[4:6] + "/" +  
-                    sub_date[6:8] + "/" +  
-                    sub_date[0:4]  
+                    sub_date[4:6] + "/"  
+                    + sub_date[6:8] + "/"  
+                    + sub_date[0:4]  
                 )
 
             approvals.append({  
@@ -382,9 +323,7 @@ def main():
                 "approval_date_raw": sub_date,  
                 "application_number": app_num,  
                 "submission_type": type_desc,  
-                "sponsor": drug.get(  
-                    "sponsor_name", "Unknown"  
-                ),  
+                "sponsor": drug.get("sponsor_name", "Unknown"),  
                 "dosage_form": dosage_form,  
                 "route": route,  
                 "active_ingredients": ingredients,  
@@ -394,42 +333,25 @@ def main():
 
     print("Parsed approvals: " + str(len(approvals)))
 
-    # Fetch indications (unique app numbers only)  
-    unique_apps = list(set(  
-        a["application_number"] for a in approvals  
-    ))  
-    print("Fetching indications for " +  
-          str(len(unique_apps)) +  
-          " unique applications...")
+    unique_apps = list(set(a["application_number"] for a in approvals))  
+    print("Fetching indications for " + str(len(unique_apps)) + " apps...")
 
     ind_map = {}  
     for i, app_num in enumerate(unique_apps):  
         if (i + 1) % 50 == 0:  
-            print("  " + str(i + 1) + "/" +  
-                  str(len(unique_apps)))  
+            print("  " + str(i + 1) + "/" + str(len(unique_apps)))  
         ind_map[app_num] = fetch_indication(app_num)  
         time.sleep(0.15)
 
-    # Apply indications and specialties  
     for a in approvals:  
-        ind = ind_map.get(  
-            a["application_number"], "N/A"  
-        )  
+        ind = ind_map.get(a["application_number"], "N/A")  
         a["indication"] = ind  
-        a["specialty"] = map_specialty(  
-            ind, a["drug_name"]  
-        )
+        a["specialty"] = map_specialty(ind, a["drug_name"])
 
-    # Sort by date descending (newest first)  
-    approvals.sort(  
-        key=lambda x: x["approval_date_raw"],  
-        reverse=True  
-    )
+    approvals.sort(key=lambda x: x["approval_date_raw"], reverse=True)
 
-    print()  
     print("Building Excel report...")
 
-    # Count stats  
     type_counts = {}  
     spec_counts = {}  
     sponsor_counts = {}
@@ -440,537 +362,234 @@ def main():
         sp = a["specialty"]  
         spec_counts[sp] = spec_counts.get(sp, 0) + 1  
         sn = a["sponsor"]  
-        sponsor_counts[sn] = (  
-            sponsor_counts.get(sn, 0) + 1  
-        )
+        sponsor_counts[sn] = sponsor_counts.get(sn, 0) + 1
 
-    spec_sorted = sorted(  
-        spec_counts.keys(),  
-        key=lambda x: spec_counts[x],  
-        reverse=True  
-    )  
-    sponsor_sorted = sorted(  
-        sponsor_counts.keys(),  
-        key=lambda x: sponsor_counts[x],  
-        reverse=True  
-    )
+    spec_sorted = sorted(spec_counts.keys(), key=lambda x: spec_counts[x], reverse=True)  
+    sponsor_sorted = sorted(sponsor_counts.keys(), key=lambda x: sponsor_counts[x], reverse=True)
 
-    from_display = (  
-        two_years_ago.strftime("%B %d, %Y")  
-    )  
-    to_display = today.strftime("%B %d, %Y")
+    from_display = two_years_ago.strftime("%B %d, %Y")  
+    to_display = today.strftime("%B %d, %Y")  
+    updated_display = today.strftime("%A, %B %d, %Y at %I:%M %p")
 
-    # Build XML  
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'  
-    xml += '<?mso-application progid="Excel.Sheet"?>\n'  
-    xml += '<Workbook xmlns="urn:schemas-microsoft-com'  
-    xml += ':office:spreadsheet"\n'  
-    xml += ' xmlns:ss="urn:schemas-microsoft-com'  
-    xml += ':office:spreadsheet">\n'
+    x = []  
+    Q = chr(34)
+
+    x.append('<?xml version=' + Q + '1.0' + Q + ' encoding=' + Q + 'UTF-8' + Q + '?>')  
+    x.append('<?mso-application progid=' + Q + 'Excel.Sheet' + Q + '?>')  
+    x.append('<Workbook xmlns=' + Q + 'urn:schemas-microsoft-com:office:spreadsheet' + Q)  
+    x.append(' xmlns:ss=' + Q + 'urn:schemas-microsoft-com:office:spreadsheet' + Q + '>')
 
     # Styles  
-    xml += '<Styles>\n'  
-    xml += '<Style ss:ID="Default" ss:Name="Normal">\n'  
-    xml += '  <Font ss:FontName="Calibri" '  
-    xml += 'ss:Size="11"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center" '  
-    xml += 'ss:WrapText="1"/>\n'  
-    xml += '</Style>\n'
+    x.append('<Styles>')
 
-    xml += '<Style ss:ID="title">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="18"'  
-    xml += ' ss:Bold="1" ss:Color="#FFFFFF"/>\n'  
-    xml += '  <Interior ss:Color="#0078D4" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
+    x.append('<Style ss:ID=' + Q + 'Default' + Q + ' ss:Name=' + Q + 'Normal' + Q + '>')  
+    x.append('<Font ss:FontName=' + Q + 'Calibri' + Q + ' ss:Size=' + Q + '11' + Q + '/>')  
+    x.append('<Alignment ss:Vertical=' + Q + 'Center' + Q + ' ss:WrapText=' + Q + '1' + Q + '/>')  
+    x.append('</Style>')
 
-    xml += '<Style ss:ID="subtitle">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="12"'  
-    xml += ' ss:Color="#FFFFFF"/>\n'  
-    xml += '  <Interior ss:Color="#0078D4" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
+    def add_style(sid, font_size, bold, fg_color, bg_color, halign, wrap, border_color):  
+        line = '<Style ss:ID=' + Q + sid + Q + '>'  
+        line += '<Font ss:FontName=' + Q + 'Calibri' + Q  
+        line += ' ss:Size=' + Q + str(font_size) + Q  
+        if bold:  
+            line += ' ss:Bold=' + Q + '1' + Q  
+        if fg_color:  
+            line += ' ss:Color=' + Q + fg_color + Q  
+        line += '/>'  
+        if bg_color:  
+            line += '<Interior ss:Color=' + Q + bg_color + Q  
+            line += ' ss:Pattern=' + Q + 'Solid' + Q + '/>'  
+        align = '<Alignment ss:Vertical=' + Q + 'Center' + Q  
+        if halign:  
+            align += ' ss:Horizontal=' + Q + halign + Q  
+        if wrap:  
+            align += ' ss:WrapText=' + Q + '1' + Q  
+        align += '/>'  
+        line += align  
+        if border_color:  
+            line += '<Borders>'  
+            line += '<Border ss:Position=' + Q + 'Bottom' + Q  
+            line += ' ss:LineStyle=' + Q + 'Continuous' + Q  
+            line += ' ss:Weight=' + Q + '1' + Q  
+            line += ' ss:Color=' + Q + border_color + Q + '/>'  
+            line += '</Borders>'  
+        line += '</Style>'  
+        x.append(line)
 
-    xml += '<Style ss:ID="section">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="13"'  
-    xml += ' ss:Bold="1" ss:Color="#0078D4"/>\n'  
-    xml += '  <Borders><Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="2" '  
-    xml += 'ss:Color="#0078D4"/></Borders>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
+    add_style("title", 18, True, "#FFFFFF", "#0078D4", None, False, None)  
+    add_style("subtitle", 12, False, "#FFFFFF", "#0078D4", None, False, None)  
+    add_style("section", 13, True, "#0078D4", None, None, False, "#0078D4")  
+    add_style("header", 11, True, "#FFFFFF", "#0078D4", None, True, "#005A9E")  
+    add_style("data", 11, False, None, None, None, True, "#E0E0E0")  
+    add_style("dataAlt", 11, False, None, "#F2F7FC", None, True, "#E0E0E0")  
+    add_style("drugName", 11, True, "#333333", None, None, False, "#E0E0E0")  
+    add_style("drugNameAlt", 11, True, "#333333", "#F2F7FC", None, False, "#E0E0E0")  
+    add_style("infoLabel", 11, True, "#555555", None, None, False, None)  
+    add_style("infoValue", 11, False, "#333333", None, None, False, None)  
+    add_style("countNum", 11, False, None, None, "Center", False, "#E0E0E0")  
+    add_style("specGroup", 12, True, "#FFFFFF", "#28A745", None, False, None)
 
-    xml += '<Style ss:ID="header">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="11"'  
-    xml += ' ss:Bold="1" ss:Color="#FFFFFF"/>\n'  
-    xml += '  <Interior ss:Color="#0078D4" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center" '  
-    xml += 'ss:WrapText="1"/>\n'  
-    xml += '  <Borders>'  
-    xml += '<Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#005A9E"/>'  
-    xml += '<Border ss:Position="Left" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#005A9E"/>'  
-    xml += '<Border ss:Position="Right" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#005A9E"/>'  
-    xml += '</Borders>\n'  
-    xml += '</Style>\n'
+    x.append('</Styles>')
 
-    xml += '<Style ss:ID="data">\n'  
-    xml += '  <Font ss:FontName="Calibri" '  
-    xml += 'ss:Size="11"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center" '  
-    xml += 'ss:WrapText="1"/>\n'  
-    xml += '  <Borders>'  
-    xml += '<Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#E0E0E0"/>'  
-    xml += '</Borders>\n'  
-    xml += '</Style>\n'
+    def cell(style, data_type, value):  
+        return ('<Cell ss:StyleID=' + Q + style + Q + '>'  
+                + '<Data ss:Type=' + Q + data_type + Q + '>'  
+                + escape_xml(str(value))  
+                + '</Data></Cell>')
 
-    xml += '<Style ss:ID="dataAlt">\n'  
-    xml += '  <Font ss:FontName="Calibri" '  
-    xml += 'ss:Size="11"/>\n'  
-    xml += '  <Interior ss:Color="#F2F7FC" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center" '  
-    xml += 'ss:WrapText="1"/>\n'  
-    xml += '  <Borders>'  
-    xml += '<Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#E0E0E0"/>'  
-    xml += '</Borders>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="drugName">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="11"'  
-    xml += ' ss:Bold="1" ss:Color="#333333"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '  <Borders>'  
-    xml += '<Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#E0E0E0"/>'  
-    xml += '</Borders>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="drugNameAlt">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="11"'  
-    xml += ' ss:Bold="1" ss:Color="#333333"/>\n'  
-    xml += '  <Interior ss:Color="#F2F7FC" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '  <Borders>'  
-    xml += '<Border ss:Position="Bottom" '  
-    xml += 'ss:LineStyle="Continuous" ss:Weight="1" '  
-    xml += 'ss:Color="#E0E0E0"/>'  
-    xml += '</Borders>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="infoLabel">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="11"'  
-    xml += ' ss:Bold="1" ss:Color="#555555"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="infoValue">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="11"'  
-    xml += ' ss:Color="#333333"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="countNum">\n'  
-    xml += '  <Font ss:FontName="Calibri" '  
-    xml += 'ss:Size="11"/>\n'  
-    xml += '  <Alignment ss:Horizontal="Center" '  
-    xml += 'ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
-
-    xml += '<Style ss:ID="specGroup">\n'  
-    xml += '  <Font ss:FontName="Calibri" ss:Size="12"'  
-    xml += ' ss:Bold="1" ss:Color="#FFFFFF"/>\n'  
-    xml += '  <Interior ss:Color="#28A745" '  
-    xml += 'ss:Pattern="Solid"/>\n'  
-    xml += '  <Alignment ss:Vertical="Center"/>\n'  
-    xml += '</Style>\n'
-
-    xml += '</Styles>\n'
+    def merged_cell(style, cols, value):  
+        return ('<Cell ss:StyleID=' + Q + style + Q  
+                + ' ss:MergeAcross=' + Q + str(cols) + Q + '>'  
+                + '<Data ss:Type=' + Q + 'String' + Q + '>'  
+                + escape_xml(str(value))  
+                + '</Data></Cell>')
 
     # SHEET 1: SUMMARY  
-    xml += '<Worksheet ss:Name="Summary">\n'  
-    xml += '<Table ss:DefaultRowHeight="20">\n'  
-    xml += '<Column ss:Width="200"/>\n'  
-    xml += '<Column ss:Width="300"/>\n'
+    x.append('<Worksheet ss:Name=' + Q + 'Summary' + Q + '>')  
+    x.append('<Table ss:DefaultRowHeight=' + Q + '20' + Q + '>')  
+    x.append('<Column ss:Width=' + Q + '200' + Q + '/>')  
+    x.append('<Column ss:Width=' + Q + '300' + Q + '/>')
 
-    xml += '<Row ss:Height="40">'  
-    xml += '<Cell ss:StyleID="title" '  
-    xml += 'ss:MergeAcross="1">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'FDA Master Drug Approval Report'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row ss:Height=' + Q + '40' + Q + '>')  
+    x.append(merged_cell("title", 1, "FDA Master Drug Approval Report"))  
+    x.append('</Row>')
 
-    xml += '<Row ss:Height="25">'  
-    xml += '<Cell ss:StyleID="subtitle" '  
-    xml += 'ss:MergeAcross="1">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Northwell Health - Business Operations'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row ss:Height=' + Q + '25' + Q + '>')  
+    x.append(merged_cell("subtitle", 1, "Northwell Health - Business Operations"))  
+    x.append('</Row>')
 
-    xml += '<Row><Cell><Data ss:Type="String">'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row><Cell><Data ss:Type=' + Q + 'String' + Q + '></Data></Cell></Row>')
 
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="infoLabel">'  
-    xml += '<Data ss:Type="String">Last Updated:'  
-    xml += '</Data></Cell>'  
-    xml += '<Cell ss:StyleID="infoValue">'  
-    xml += '<Data ss:Type="String">'  
-    xml += escape_xml(today.strftime(  
-        "%A, %B %d, %Y at %I:%M %p"  
-    ))  
-    xml += '</Data></Cell></Row>\n'
+    info_rows = [  
+        ("Last Updated:", updated_display),  
+        ("Coverage:", from_display + " to " + to_display),  
+        ("Total Approvals:", str(len(approvals))),  
+        ("Auto-Updated:", "Daily at 9:00 AM EST"),  
+    ]  
+    for label, value in info_rows:  
+        x.append('<Row>')  
+        x.append(cell("infoLabel", "String", label))  
+        x.append(cell("infoValue", "String", value))  
+        x.append('</Row>')
 
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="infoLabel">'  
-    xml += '<Data ss:Type="String">Coverage:</Data>'  
-    xml += '</Cell>'  
-    xml += '<Cell ss:StyleID="infoValue">'  
-    xml += '<Data ss:Type="String">'  
-    xml += escape_xml(from_display)  
-    xml += ' to '  
-    xml += escape_xml(to_display)  
-    xml += '</Data></Cell></Row>\n'
-
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="infoLabel">'  
-    xml += '<Data ss:Type="String">Total Approvals:'  
-    xml += '</Data></Cell>'  
-    xml += '<Cell ss:StyleID="infoValue">'  
-    xml += '<Data ss:Type="Number">'  
-    xml += str(len(approvals))  
-    xml += '</Data></Cell></Row>\n'
-
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="infoLabel">'  
-    xml += '<Data ss:Type="String">Auto-Updated:'  
-    xml += '</Data></Cell>'  
-    xml += '<Cell ss:StyleID="infoValue">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Daily at 9:00 AM EST'  
-    xml += '</Data></Cell></Row>\n'
-
-    xml += '<Row><Cell><Data ss:Type="String">'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row><Cell><Data ss:Type=' + Q + 'String' + Q + '></Data></Cell></Row>')
 
     # By Type  
-    xml += '<Row><Cell ss:StyleID="section" '  
-    xml += 'ss:MergeAcross="1">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Approvals by Submission Type'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row>' + merged_cell("section", 1, "Approvals by Submission Type") + '</Row>')  
+    x.append('<Row>' + cell("header", "String", "Type") + cell("header", "String", "Count") + '</Row>')  
+    for t in sorted(type_counts.keys(), key=lambda k: type_counts[k], reverse=True):  
+        x.append('<Row>' + cell("data", "String", t) + cell("countNum", "Number", str(type_counts[t])) + '</Row>')
 
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Type</Data></Cell>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Count</Data></Cell>'  
-    xml += '</Row>\n'
-
-    for t, c in sorted(  
-        type_counts.items(),  
-        key=lambda x: x[1],  
-        reverse=True  
-    ):  
-        xml += '<Row>'  
-        xml += '<Cell ss:StyleID="data">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(t) + '</Data></Cell>'  
-        xml += '<Cell ss:StyleID="countNum">'  
-        xml += '<Data ss:Type="Number">'  
-        xml += str(c) + '</Data></Cell>'  
-        xml += '</Row>\n'
-
-    xml += '<Row><Cell><Data ss:Type="String">'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row><Cell><Data ss:Type=' + Q + 'String' + Q + '></Data></Cell></Row>')
 
     # By Specialty  
-    xml += '<Row><Cell ss:StyleID="section" '  
-    xml += 'ss:MergeAcross="1">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Approvals by Specialty'  
-    xml += '</Data></Cell></Row>\n'
-
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Specialty'  
-    xml += '</Data></Cell>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Count</Data></Cell>'  
-    xml += '</Row>\n'
-
+    x.append('<Row>' + merged_cell("section", 1, "Approvals by Specialty") + '</Row>')  
+    x.append('<Row>' + cell("header", "String", "Specialty") + cell("header", "String", "Count") + '</Row>')  
     for sp in spec_sorted:  
-        xml += '<Row>'  
-        xml += '<Cell ss:StyleID="data">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(sp) + '</Data></Cell>'  
-        xml += '<Cell ss:StyleID="countNum">'  
-        xml += '<Data ss:Type="Number">'  
-        xml += str(spec_counts[sp])  
-        xml += '</Data></Cell></Row>\n'
+        x.append('<Row>' + cell("data", "String", sp) + cell("countNum", "Number", str(spec_counts[sp])) + '</Row>')
 
-    xml += '<Row><Cell><Data ss:Type="String">'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row><Cell><Data ss:Type=' + Q + 'String' + Q + '></Data></Cell></Row>')
 
     # Top Sponsors  
-    xml += '<Row><Cell ss:StyleID="section" '  
-    xml += 'ss:MergeAcross="1">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Top 15 Sponsors'  
-    xml += '</Data></Cell></Row>\n'
-
-    xml += '<Row>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Sponsor'  
-    xml += '</Data></Cell>'  
-    xml += '<Cell ss:StyleID="header">'  
-    xml += '<Data ss:Type="String">Count</Data></Cell>'  
-    xml += '</Row>\n'
-
+    x.append('<Row>' + merged_cell("section", 1, "Top 15 Sponsors") + '</Row>')  
+    x.append('<Row>' + cell("header", "String", "Sponsor") + cell("header", "String", "Count") + '</Row>')  
     for sn in sponsor_sorted[:15]:  
-        xml += '<Row>'  
-        xml += '<Cell ss:StyleID="data">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(sn) + '</Data></Cell>'  
-        xml += '<Cell ss:StyleID="countNum">'  
-        xml += '<Data ss:Type="Number">'  
-        xml += str(sponsor_counts[sn])  
-        xml += '</Data></Cell></Row>\n'
+        x.append('<Row>' + cell("data", "String", sn) + cell("countNum", "Number", str(sponsor_counts[sn])) + '</Row>')
 
-    xml += '</Table>\n</Worksheet>\n'
+    x.append('</Table></Worksheet>')
 
     # SHEET 2: ALL APPROVALS  
-    xml += '<Worksheet ss:Name="All Approvals">\n'  
-    xml += '<Table ss:DefaultRowHeight="22">\n'  
-    xml += '<Column ss:Width="30"/>\n'  
-    xml += '<Column ss:Width="150"/>\n'  
-    xml += '<Column ss:Width="180"/>\n'  
-    xml += '<Column ss:Width="130"/>\n'  
-    xml += '<Column ss:Width="90"/>\n'  
-    xml += '<Column ss:Width="140"/>\n'  
-    xml += '<Column ss:Width="170"/>\n'  
-    xml += '<Column ss:Width="110"/>\n'  
-    xml += '<Column ss:Width="120"/>\n'  
-    xml += '<Column ss:Width="80"/>\n'  
-    xml += '<Column ss:Width="250"/>\n'  
-    xml += '<Column ss:Width="400"/>\n'
+    x.append('<Worksheet ss:Name=' + Q + 'All Approvals' + Q + '>')  
+    x.append('<Table ss:DefaultRowHeight=' + Q + '22' + Q + '>')  
+    widths = [30, 150, 180, 130, 90, 140, 170, 110, 120, 80, 250, 400]  
+    for w in widths:  
+        x.append('<Column ss:Width=' + Q + str(w) + Q + '/>')
 
-    xml += '<Row ss:Height="35">'  
-    xml += '<Cell ss:StyleID="title" '  
-    xml += 'ss:MergeAcross="11">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'FDA Master Report - All Approvals ('  
-    xml += escape_xml(from_display) + ' to '  
-    xml += escape_xml(to_display) + ')'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row ss:Height=' + Q + '35' + Q + '>')  
+    x.append(merged_cell("title", 11, "FDA Master Report - All Approvals (" + from_display + " to " + to_display + ")"))  
+    x.append('</Row>')
 
-    headers = [  
-        "#", "Drug Name", "Generic Name",  
-        "Specialty", "Approval Date",  
-        "Submission Type", "Sponsor",  
-        "Application #", "Dosage Form",  
-        "Route", "Active Ingredients",  
-        "Indication"  
-    ]
-
-    xml += '<Row ss:Height="30">'  
+    headers = ["#", "Drug Name", "Generic Name", "Specialty", "Approval Date",  
+               "Submission Type", "Sponsor", "Application #", "Dosage Form",  
+               "Route", "Active Ingredients", "Indication"]  
+    x.append('<Row ss:Height=' + Q + '30' + Q + '>')  
     for h in headers:  
-        xml += '<Cell ss:StyleID="header">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(h) + '</Data></Cell>'  
-    xml += '</Row>\n'
+        x.append(cell("header", "String", h))  
+    x.append('</Row>')
 
     for idx, a in enumerate(approvals):  
         is_alt = idx % 2 == 1  
         rs = "dataAlt" if is_alt else "data"  
-        ns = "drugNameAlt" if is_alt else "drugName"
+        ns = "drugNameAlt" if is_alt else "drugName"  
+        x.append('<Row>')  
+        x.append(cell(rs, "Number", str(idx + 1)))  
+        x.append(cell(ns, "String", a["drug_name"]))  
+        for f in ["generic_name", "specialty", "approval_date", "submission_type",  
+                   "sponsor", "application_number", "dosage_form", "route",  
+                   "active_ingredients", "indication"]:  
+            x.append(cell(rs, "String", a[f]))  
+        x.append('</Row>')
 
-        xml += '<Row>'  
-        xml += '<Cell ss:StyleID="' + rs + '">'  
-        xml += '<Data ss:Type="Number">'  
-        xml += str(idx + 1) + '</Data></Cell>'  
-        xml += '<Cell ss:StyleID="' + ns + '">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(a["drug_name"])  
-        xml += '</Data></Cell>'
-
-        for field in [  
-            "generic_name", "specialty",  
-            "approval_date", "submission_type",  
-            "sponsor", "application_number",  
-            "dosage_form", "route",  
-            "active_ingredients", "indication"  
-        ]:  
-            xml += '<Cell ss:StyleID="' + rs + '">'  
-            xml += '<Data ss:Type="String">'  
-            xml += escape_xml(a[field])  
-            xml += '</Data></Cell>'
-
-        xml += '</Row>\n'
-
-    xml += '</Table>\n</Worksheet>\n'
+    x.append('</Table></Worksheet>')
 
     # SHEET 3: BY SPECIALTY  
-    xml += '<Worksheet ss:Name="By Specialty">\n'  
-    xml += '<Table ss:DefaultRowHeight="22">\n'  
-    xml += '<Column ss:Width="150"/>\n'  
-    xml += '<Column ss:Width="180"/>\n'  
-    xml += '<Column ss:Width="90"/>\n'  
-    xml += '<Column ss:Width="140"/>\n'  
-    xml += '<Column ss:Width="170"/>\n'  
-    xml += '<Column ss:Width="400"/>\n'
+    x.append('<Worksheet ss:Name=' + Q + 'By Specialty' + Q + '>')  
+    x.append('<Table ss:DefaultRowHeight=' + Q + '22' + Q + '>')  
+    spec_widths = [150, 180, 90, 140, 170, 400]  
+    for w in spec_widths:  
+        x.append('<Column ss:Width=' + Q + str(w) + Q + '/>')
 
-    xml += '<Row ss:Height="35">'  
-    xml += '<Cell ss:StyleID="title" '  
-    xml += 'ss:MergeAcross="5">'  
-    xml += '<Data ss:Type="String">'  
-    xml += 'Approvals Grouped by Specialty'  
-    xml += '</Data></Cell></Row>\n'
+    x.append('<Row ss:Height=' + Q + '35' + Q + '>')  
+    x.append(merged_cell("title", 5, "Approvals Grouped by Specialty"))  
+    x.append('</Row>')
 
     for sp in spec_sorted:  
-        xml += '<Row ss:Height="28">'  
-        xml += '<Cell ss:StyleID="specGroup" '  
-        xml += 'ss:MergeAcross="5">'  
-        xml += '<Data ss:Type="String">'  
-        xml += escape_xml(sp) + ' ('  
-        xml += str(spec_counts[sp]) + ')'  
-        xml += '</Data></Cell></Row>\n'
+        x.append('<Row ss:Height=' + Q + '28' + Q + '>')  
+        x.append(merged_cell("specGroup", 5, sp + " (" + str(spec_counts[sp]) + ")"))  
+        x.append('</Row>')
 
-        xml += '<Row>'  
-        for sh in [  
-            "Drug Name", "Generic Name",  
-            "Approval Date", "Submission Type",  
-            "Sponsor", "Indication"  
-        ]:  
-            xml += '<Cell ss:StyleID="header">'  
-            xml += '<Data ss:Type="String">'  
-            xml += escape_xml(sh) + '</Data></Cell>'  
-        xml += '</Row>\n'
+        x.append('<Row>')  
+        for sh in ["Drug Name", "Generic Name", "Approval Date", "Submission Type", "Sponsor", "Indication"]:  
+            x.append(cell("header", "String", sh))  
+        x.append('</Row>')
 
         row_count = 0  
         for a in approvals:  
             if a["specialty"] == sp:  
                 is_alt = row_count % 2 == 1  
                 rs = "dataAlt" if is_alt else "data"  
-                ns = ("drugNameAlt" if is_alt  
-                      else "drugName")
-
-                xml += '<Row>'  
-                xml += '<Cell ss:StyleID="' + ns + '">'  
-                xml += '<Data ss:Type="String">'  
-                xml += escape_xml(a["drug_name"])  
-                xml += '</Data></Cell>'
-
-                for f in [  
-                    "generic_name", "approval_date",  
-                    "submission_type", "sponsor",  
-                    "indication"  
-                ]:  
-                    xml += '<Cell ss:StyleID="'  
-                    xml += rs + '">'  
-                    xml += '<Data ss:Type="String">'  
-                    xml += escape_xml(a[f])  
-                    xml += '</Data></Cell>'
-
-                xml += '</Row>\n'  
+                ns = "drugNameAlt" if is_alt else "drugName"  
+                x.append('<Row>')  
+                x.append(cell(ns, "String", a["drug_name"]))  
+                for f in ["generic_name", "approval_date", "submission_type", "sponsor", "indication"]:  
+                    x.append(cell(rs, "String", a[f]))  
+                x.append('</Row>')  
                 row_count += 1
 
-        xml += '<Row><Cell>'  
-        xml += '<Data ss:Type="String"></Data>'  
-        xml += '</Cell></Row>\n'
+        x.append('<Row><Cell><Data ss:Type=' + Q + 'String' + Q + '></Data></Cell></Row>')
 
-    xml += '</Table>\n</Worksheet>\n'  
-    xml += '</Workbook>'
+    x.append('</Table></Worksheet>')  
+    x.append('</Workbook>')
 
-    # Save to docs folder for GitHub Pages  
+    xml_content = "\n".join(x)
+
     os.makedirs("docs", exist_ok=True)
 
-    filepath = "docs/FDA_Master_Report.xls"  
-    with open(filepath, "w", encoding="utf-8") as f:  
-        f.write(xml)
+    with open("docs/FDA_Master_Report.xls", "w", encoding="utf-8") as f:  
+        f.write(xml_content)
 
-    print()  
-    print("Master report saved: " + filepath)  
+    print("Master report saved: docs/FDA_Master_Report.xls")  
     print("Total approvals: " + str(len(approvals)))
 
-    # Also save a small JSON metadata file  
     meta = {  
-        "last_updated": today.strftime(  
-            "%Y-%m-%d %H:%M:%S"  
-        ),  
+        "last_updated": today.strftime("%Y-%m-%d %H:%M:%S"),  
         "total_approvals": len(approvals),  
         "date_from": from_display,  
         "date_to": to_display,  
-        "specialty_counts": spec_counts,  
-        "type_counts": type_counts,  
-    }
-
-    meta_path = "docs/master_report_meta.json"  
-    with open(meta_path, "w") as f:  
+    }  
+    with open("docs/master_report_meta.json", "w") as f:  
         json.dump(meta, f, indent=2)
 
-    print("Metadata saved: " + meta_path)
-
-        # Create index.html for GitHub Pages  
-    index_lines = []  
-    index_lines.append("<!DOCTYPE html>")  
-    index_lines.append("<html><head>")  
-    index_lines.append("<title>FDA Master Report</title>")  
-    index_lines.append("<style>")  
-    index_lines.append("body { font-family: Arial; ")  
-    index_lines.append("max-width: 600px; ")  
-    index_lines.append("margin: 50px auto; ")  
-    index_lines.append("text-align: center; }")  
-    index_lines.append("h1 { color: #0078D4; }")  
-    index_lines.append(".btn { display: inline-block; ")  
-    index_lines.append("padding: 15px 40px; ")  
-    index_lines.append("background: #0078D4; ")  
-    index_lines.append("color: white; ")  
-    index_lines.append("text-decoration: none; ")  
-    index_lines.append("border-radius: 8px; ")  
-    index_lines.append("font-size: 18px; ")  
-    index_lines.append("margin: 20px; }")  
-    index_lines.append(".btn:hover { background: #006abc; }")  
-    index_lines.append(".info { color: #666; ")  
-    index_lines.append("font-size: 14px; }")  
-    index_lines.append("</style>")  
-    index_lines.append("</head><body>")  
-    index_lines.append("<h1>FDA Drug Approval ")  
-    index_lines.append("Master Report</h1>")  
-    index_lines.append("<p>Northwell Health - ")  
-    index_lines.append("Business Operations</p>")  
-    index_lines.append('<a class="btn" ')  
-    index_lines.append('href="FDA_Master_Report.xls" ')  
-    index_lines.append('download>Download ')  
-    index_lines.append("Master Report</a>")  
-    index_lines.append('<p class="info">')  
-    index_lines.append("Last updated: ")  
-    index_lines.append(today.strftime("%B %d, %Y"))  
-    index_lines.append("<br>Auto-updates daily ")  
-    index_lines.append("at 9:00 AM EST</p>")  
-    index_lines.append("</body></html>")
-
-    index_html = "\n".join(index_lines)
-
-    with open("docs/index.html", "w") as f:  
-        f.write(index_html)  
-
-    print("GitHub Pages index saved: docs/index.html")  
-    print()  
     print("DONE!")
 
 
