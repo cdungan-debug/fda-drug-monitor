@@ -3,7 +3,9 @@
   "name": "FDA Drug Approval Report",  
   "version": "1.0",  
   "description": "Download latest FDA drug approvals as an Excel report",  
-  "permissions": [],  
+  "permissions": [
+  "storage"
+]  
   "host_permissions": [  
     "https://api.fda.gov/*"  
   ],  
