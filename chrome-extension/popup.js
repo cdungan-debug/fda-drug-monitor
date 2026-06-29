@@ -11,8 +11,19 @@ document.addEventListener("DOMContentLoaded", function () {
   document.getElementById("downloadBtn")
     .addEventListener("click", fetchAndDownload);
   
-  document.getElementById("updateMasterBtn")
-    .addEventListener("click", updateMasterSpreadsheet); 
+   var masterBtn =
+    document.getElementById(
+      "updateMasterBtn"
+    );
+  
+  if (masterBtn) {
+  
+    masterBtn.addEventListener(
+      "click",
+      updateMasterSpreadsheet
+    );
+  
+  }
 });
 
 
