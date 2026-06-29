@@ -28,9 +28,16 @@ function formatDateFDA(dateStr) {
 
 function formatDateDisplay(dateStr) {  
   if (!dateStr) return "N/A";  
+  var months = [  
+    "January", "February", "March", "April",  
+    "May", "June", "July", "August",  
+    "September", "October", "November", "December"  
+  ];  
   var parts = dateStr.split("-");  
   if (parts.length === 3) {  
-    return parts[1] + "/" + parts[2] + "/" + parts[0];  
+    var mi = parseInt(parts[1]) - 1;  
+    return months[mi] + " " + parseInt(parts[2]) +  
+      ", " + parts[0];  
   }  
   return dateStr;  
 }
@@ -92,7 +99,6 @@ function mapIndicationToSpecialty(indication, drugName) {
     "angina": "Cardiology",  
     "arrhythmia": "Cardiology",  
     "atrial fibrillation": "Cardiology",  
-    "anticoagulant": "Cardiology",  
     "blood pressure": "Cardiology",  
     "cancer": "Oncology",  
     "tumor": "Oncology",  
@@ -101,17 +107,14 @@ function mapIndicationToSpecialty(indication, drugName) {
     "leukemia": "Oncology",  
     "melanoma": "Oncology / Dermatology",  
     "metastatic": "Oncology",  
-    "neoplasm": "Oncology",  
     "seizure": "Neurology",  
     "epilepsy": "Neurology",  
     "neurological": "Neurology",  
     "anticonvulsant": "Neurology",  
-    "multiple sclerosis": "Neurology",  
     "schizophrenia": "Psychiatry",  
     "bipolar": "Psychiatry",  
     "antipsychotic": "Psychiatry",  
     "depression": "Psychiatry",  
-    "anxiety": "Psychiatry",  
     "acne": "Dermatology",  
     "dermatitis": "Dermatology",  
     "psoriasis": "Dermatology",  
@@ -123,20 +126,17 @@ function mapIndicationToSpecialty(indication, drugName) {
     "arthritis": "Rheumatology",  
     "rheumatoid": "Rheumatology",  
     "lupus": "Rheumatology",  
-    "autoimmune": "Rheumatology",  
     "glaucoma": "Ophthalmology",  
     "ophthalmic": "Ophthalmology",  
     "retinal": "Ophthalmology",  
     "liver": "Gastroenterology",  
     "hepatic": "Gastroenterology",  
     "gastrointestinal": "Gastroenterology",  
-    "nausea": "Gastroenterology",  
     "renal": "Nephrology",  
     "kidney": "Nephrology",  
     "diabetes": "Endocrinology",  
     "thyroid": "Endocrinology",  
     "osteoporosis": "Endocrinology",  
-    "hormone": "Endocrinology",  
     "infection": "Infectious Disease",  
     "antibacterial": "Infectious Disease",  
     "antiviral": "Infectious Disease",  
@@ -148,7 +148,6 @@ function mapIndicationToSpecialty(indication, drugName) {
     "pregnancy": "OB/GYN",  
     "contracepti": "OB/GYN",  
     "estradiol": "OB/GYN",  
-    "menopausal": "OB/GYN",  
   };
 
   for (var keyword in mapping) {  
@@ -157,6 +156,17 @@ function mapIndicationToSpecialty(indication, drugName) {
     }  
   }  
   return "General / Review Needed";  
+}
+
+
+function escapeXml(str) {  
+  if (!str) return "";  
+  return str  
+    .replace(/&/g, "&")  
+    .replace(/</g, "<")  
+    .replace(/>/g, ">")  
+    .replace(/"/g, """)  
+    .replace(/'/g, "'");  
 }
 
 
@@ -193,9 +203,8 @@ function fetchAndDownload() {
         return null;  
       }  
       if (!response.ok) {  
-        throw new Error(  
-          "FDA API error: " + response.status  
-        );  
+        throw new Error("FDA API error: " +  
+          response.status);  
       }  
       return response.json();  
     })  
@@ -359,7 +368,6 @@ function fetchAndDownload() {
             );  
         }
 
-        // Sort by date then drug name  
         approvals.sort(function (a, b) {  
           if (a.approval_date_raw !==  
               b.approval_date_raw) {  
@@ -371,8 +379,10 @@ function fetchAndDownload() {
         });
 
         setStatus("loading",  
-          "Generating Excel report...");  
-        generateExcel(approvals, fromDate, toDate);  
+          "Generating formatted report...");  
+        generateFormattedExcel(  
+          approvals, fromDate, toDate  
+        );  
         setStatus("success",  
           "Downloaded " + approvals.length +  
           " drug approval(s).");  
@@ -386,287 +396,474 @@ function fetchAndDownload() {
 }
 
 
-function generateExcel(approvals, fromDate, toDate) {  
-  var wb = XLSX.utils.book_new();
-
-  // =============================================  
-  // SHEET 1: SUMMARY  
-  // =============================================  
-  var summaryRows = [];
-
-  summaryRows.push(["FDA DRUG APPROVAL REPORT"]);  
-  summaryRows.push(["Northwell Health — " +  
-    "Business Operations"]);  
-  summaryRows.push([""]);  
-  summaryRows.push(["Report Date:",  
-    new Date().toLocaleDateString("en-US", {  
-      weekday: "long",  
-      year: "numeric",  
-      month: "long",  
-      day: "numeric"  
-    })  
-  ]);  
-  summaryRows.push(["Date Range:",  
-    formatDateDisplay(fromDate) + " to " +  
-    formatDateDisplay(toDate)  
-  ]);  
-  summaryRows.push(["Total Approvals:",  
-    approvals.length  
-  ]);  
-  summaryRows.push([""]);
-
-  // Count by submission type  
+function generateFormattedExcel(approvals, fromDate,  
+                                 toDate) {  
+  // Count by type and specialty  
   var typeCounts = {};  
   var specCounts = {};  
   var sponsorCounts = {};
 
   for (var i = 0; i < approvals.length; i++) {  
-    var a = approvals[i];
-
-    var st = a.submission_type;  
-    typeCounts[st] = (typeCounts[st] || 0) + 1;
-
-    var sp = a.specialty;  
-    specCounts[sp] = (specCounts[sp] || 0) + 1;
-
-    var sn = a.sponsor;  
-    sponsorCounts[sn] = (sponsorCounts[sn] || 0) + 1;  
+    var a = approvals[i];  
+    typeCounts[a.submission_type] =  
+      (typeCounts[a.submission_type] || 0) + 1;  
+    specCounts[a.specialty] =  
+      (specCounts[a.specialty] || 0) + 1;  
+    sponsorCounts[a.sponsor] =  
+      (sponsorCounts[a.sponsor] || 0) + 1;  
   }
-
-  summaryRows.push(["APPROVALS BY TYPE", ""]);  
-  summaryRows.push(["Type", "Count"]);  
-  for (var t in typeCounts) {  
-    summaryRows.push([t, typeCounts[t]]);  
-  }  
-  summaryRows.push([""]);
-
-  summaryRows.push(["APPROVALS BY SPECIALTY", ""]);  
-  summaryRows.push(["Specialty", "Count"]);
 
   var specKeys = Object.keys(specCounts).sort(  
     function (a, b) {  
       return specCounts[b] - specCounts[a];  
     }  
-  );  
-  for (var s = 0; s < specKeys.length; s++) {  
-    summaryRows.push([  
-      specKeys[s], specCounts[specKeys[s]]  
-    ]);  
-  }  
-  summaryRows.push([""]);
-
-  summaryRows.push(["TOP SPONSORS", ""]);  
-  summaryRows.push(["Sponsor", "Count"]);
+  );
 
   var sponsorKeys = Object.keys(sponsorCounts).sort(  
     function (a, b) {  
       return sponsorCounts[b] - sponsorCounts[a];  
     }  
-  );  
-  for (var sp2 = 0;  
-       sp2 < Math.min(sponsorKeys.length, 10);  
-       sp2++) {  
-    summaryRows.push([  
-      sponsorKeys[sp2],  
-      sponsorCounts[sponsorKeys[sp2]]  
-    ]);  
-  }
-
-  var wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);  
-  wsSummary["!cols"] = [  
-    { wch: 35 },  
-    { wch: 40 }  
-  ];
-
-  XLSX.utils.book_append_sheet(  
-    wb, wsSummary, "Summary"  
   );
 
-  // =============================================  
-  // SHEET 2: ALL APPROVALS (DETAILED)  
-  // =============================================  
-  var detailRows = [];
+  // Build XML Spreadsheet  
+  var xml = '<?xml version="1.0" encoding="UTF-8"?>\n';  
+  xml += '<?mso-application progid="Excel.Sheet"?>\n';  
+  xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';  
+  xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n';  
+  xml += ' xmlns:x="urn:schemas-microsoft-com:office:excel">\n';
 
-  detailRows.push([  
-    "#",  
-    "Drug Name",  
-    "Generic Name",  
-    "Mapped Specialty",  
-    "Approval Date",  
-    "Submission Type",  
-    "Sponsor",  
-    "Application #",  
-    "Dosage Form",  
-    "Route",  
-    "Active Ingredients",  
-    "Indication / Use"  
-  ]);
+  // ---- STYLES ----  
+  xml += '<Styles>\n';
 
+  // Default  
+  xml += '<Style ss:ID="Default" ss:Name="Normal">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
+  xml += '</Style>\n';
+
+  // Title - big blue header  
+  xml += '<Style ss:ID="title">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="18" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
+  xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  // Subtitle  
+  xml += '<Style ss:ID="subtitle">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="12" ss:Color="#FFFFFF"/>\n';  
+  xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  // Section header  
+  xml += '<Style ss:ID="section">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="13" ss:Bold="1" ss:Color="#0078D4"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#0078D4"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  // Column header - dark blue  
+  xml += '<Style ss:ID="header">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
+  xml += '  <Interior ss:Color="#0078D4" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#005A9E"/>\n';  
+  xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#005A9E"/>\n';  
+  xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#005A9E"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Data row - white  
+  xml += '<Style ss:ID="data">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Data row - alternating grey  
+  xml += '<Style ss:ID="dataAlt">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
+  xml += '  <Interior ss:Color="#F2F7FC" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center" ss:WrapText="1"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Drug name bold  
+  xml += '<Style ss:ID="drugName">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Drug name bold alt  
+  xml += '<Style ss:ID="drugNameAlt">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#333333"/>\n';  
+  xml += '  <Interior ss:Color="#F2F7FC" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Info label bold  
+  xml += '<Style ss:ID="infoLabel">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#555555"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  // Info value  
+  xml += '<Style ss:ID="infoValue">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#333333"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  // Count number  
+  xml += '<Style ss:ID="countNum">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="11"/>\n';  
+  xml += '  <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>\n';  
+  xml += '  <Borders>\n';  
+  xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>\n';  
+  xml += '  </Borders>\n';  
+  xml += '</Style>\n';
+
+  // Specialty group header  
+  xml += '<Style ss:ID="specGroup">\n';  
+  xml += '  <Font ss:FontName="Calibri" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>\n';  
+  xml += '  <Interior ss:Color="#28A745" ss:Pattern="Solid"/>\n';  
+  xml += '  <Alignment ss:Vertical="Center"/>\n';  
+  xml += '</Style>\n';
+
+  xml += '</Styles>\n';
+
+  // =========================================  
+  // SHEET 1: SUMMARY  
+  // =========================================  
+  xml += '<Worksheet ss:Name="Summary">\n';  
+  xml += '<Table ss:DefaultRowHeight="20">\n';  
+  xml += '<Column ss:Width="200"/>\n';  
+  xml += '<Column ss:Width="300"/>\n';
+
+  // Title  
+  xml += '<Row ss:Height="40">\n';  
+  xml += '  <Cell ss:StyleID="title" ss:MergeAcross="1">';  
+  xml += '<Data ss:Type="String">FDA Drug Approval Report</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row ss:Height="25">\n';  
+  xml += '  <Cell ss:StyleID="subtitle" ss:MergeAcross="1">';  
+  xml += '<Data ss:Type="String">Northwell Health — Business Operations</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
+
+  // Info rows  
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Report Generated:</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="String">' +  
+    escapeXml(new Date().toLocaleDateString("en-US", {  
+      weekday: "long", year: "numeric",  
+      month: "long", day: "numeric"  
+    })) + '</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Date Range:</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="String">' +  
+    escapeXml(formatDateDisplay(fromDate)) + ' to ' +  
+    escapeXml(formatDateDisplay(toDate)) +  
+    '</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="infoLabel"><Data ss:Type="String">Total Approvals:</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="infoValue"><Data ss:Type="Number">' +  
+    approvals.length + '</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
+
+  // By Type  
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
+  xml += '<Data ss:Type="String">Approvals by Submission Type</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Type</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Count</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  for (var t in typeCounts) {  
+    xml += '<Row>\n';  
+    xml += '  <Cell ss:StyleID="data"><Data ss:Type="String">' +  
+      escapeXml(t) + '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="countNum"><Data ss:Type="Number">' +  
+      typeCounts[t] + '</Data></Cell>\n';  
+    xml += '</Row>\n';  
+  }
+
+  xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
+
+  // By Specialty  
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
+  xml += '<Data ss:Type="String">Approvals by Specialty</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Specialty</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Count</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  for (var s = 0; s < specKeys.length; s++) {  
+    xml += '<Row>\n';  
+    xml += '  <Cell ss:StyleID="data"><Data ss:Type="String">' +  
+      escapeXml(specKeys[s]) + '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="countNum"><Data ss:Type="Number">' +  
+      specCounts[specKeys[s]] + '</Data></Cell>\n';  
+    xml += '</Row>\n';  
+  }
+
+  xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';
+
+  // Top Sponsors  
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="section" ss:MergeAcross="1">';  
+  xml += '<Data ss:Type="String">Top Sponsors</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  xml += '<Row>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Sponsor</Data></Cell>\n';  
+  xml += '  <Cell ss:StyleID="header"><Data ss:Type="String">Count</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  var maxSponsors = Math.min(sponsorKeys.length, 10);  
+  for (var sp = 0; sp < maxSponsors; sp++) {  
+    xml += '<Row>\n';  
+    xml += '  <Cell ss:StyleID="data"><Data ss:Type="String">' +  
+      escapeXml(sponsorKeys[sp]) + '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="countNum"><Data ss:Type="Number">' +  
+      sponsorCounts[sponsorKeys[sp]] + '</Data></Cell>\n';  
+    xml += '</Row>\n';  
+  }
+
+  xml += '</Table>\n</Worksheet>\n';
+
+  // =========================================  
+  // SHEET 2: ALL APPROVALS  
+  // =========================================  
+  xml += '<Worksheet ss:Name="All Approvals">\n';  
+  xml += '<Table ss:DefaultRowHeight="22">\n';  
+  xml += '<Column ss:Width="30"/>\n';   // #  
+  xml += '<Column ss:Width="150"/>\n';  // Drug  
+  xml += '<Column ss:Width="180"/>\n';  // Generic  
+  xml += '<Column ss:Width="130"/>\n';  // Specialty  
+  xml += '<Column ss:Width="90"/>\n';   // Date  
+  xml += '<Column ss:Width="140"/>\n';  // Type  
+  xml += '<Column ss:Width="170"/>\n';  // Sponsor  
+  xml += '<Column ss:Width="110"/>\n';  // App#  
+  xml += '<Column ss:Width="120"/>\n';  // Dosage  
+  xml += '<Column ss:Width="80"/>\n';   // Route  
+  xml += '<Column ss:Width="250"/>\n';  // Ingredients  
+  xml += '<Column ss:Width="400"/>\n';  // Indication
+
+  // Title row  
+  xml += '<Row ss:Height="35">\n';  
+  xml += '  <Cell ss:StyleID="title" ss:MergeAcross="11">';  
+  xml += '<Data ss:Type="String">FDA Drug Approvals — ' +  
+    escapeXml(formatDateDisplay(fromDate)) + ' to ' +  
+    escapeXml(formatDateDisplay(toDate)) +  
+    '</Data></Cell>\n';  
+  xml += '</Row>\n';
+
+  // Header row  
+  xml += '<Row ss:Height="30">\n';  
+  var headers = ["#", "Drug Name", "Generic Name",  
+    "Specialty", "Approval Date", "Submission Type",  
+    "Sponsor", "Application #", "Dosage Form",  
+    "Route", "Active Ingredients",  
+    "Indication / Use"];  
+  for (var h = 0; h < headers.length; h++) {  
+    xml += '  <Cell ss:StyleID="header">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(headers[h]) +  
+      '</Data></Cell>\n';  
+  }  
+  xml += '</Row>\n';
+
+  // Data rows  
   for (var d = 0; d < approvals.length; d++) {  
     var app = approvals[d];  
-    detailRows.push([  
-      d + 1,  
-      app.drug_name,  
-      app.generic_name,  
-      app.specialty,  
-      app.approval_date,  
-      app.submission_type,  
-      app.sponsor,  
-      app.application_number,  
-      app.dosage_form,  
-      app.route,  
-      app.active_ingredients,  
-      app.indication  
-    ]);  
+    var isAlt = d % 2 === 1;  
+    var rowStyle = isAlt ? "dataAlt" : "data";  
+    var nameStyle = isAlt ? "drugNameAlt" : "drugName";
+
+    xml += '<Row>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="Number">' +  
+      (d + 1) + '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + nameStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.drug_name) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.generic_name) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.specialty) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.approval_date) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.submission_type) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.sponsor) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.application_number) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.dosage_form) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.route) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.active_ingredients) +  
+      '</Data></Cell>\n';  
+    xml += '  <Cell ss:StyleID="' + rowStyle + '">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(app.indication) +  
+      '</Data></Cell>\n';  
+    xml += '</Row>\n';  
   }
 
-  var wsDetail = XLSX.utils.aoa_to_sheet(detailRows);  
-  wsDetail["!cols"] = [  
-    { wch: 4 },  
-    { wch: 22 },  
-    { wch: 28 },  
-    { wch: 22 },  
-    { wch: 14 },  
-    { wch: 20 },  
-    { wch: 25 },  
-    { wch: 16 },  
-    { wch: 18 },  
-    { wch: 12 },  
-    { wch: 40 },  
-    { wch: 60 }  
-  ];
+  xml += '</Table>\n</Worksheet>\n';
 
-  XLSX.utils.book_append_sheet(  
-    wb, wsDetail, "All Approvals"  
-  );
-
-  // =============================================  
+  // =========================================  
   // SHEET 3: BY SPECIALTY  
-  // =============================================  
-  var specRows = [];
+  // =========================================  
+  xml += '<Worksheet ss:Name="By Specialty">\n';  
+  xml += '<Table ss:DefaultRowHeight="22">\n';  
+  xml += '<Column ss:Width="150"/>\n';  
+  xml += '<Column ss:Width="180"/>\n';  
+  xml += '<Column ss:Width="90"/>\n';  
+  xml += '<Column ss:Width="140"/>\n';  
+  xml += '<Column ss:Width="170"/>\n';  
+  xml += '<Column ss:Width="400"/>\n';
 
-  specRows.push([  
-    "Specialty",  
-    "#",  
-    "Drug Name",  
-    "Generic Name",  
-    "Approval Date",  
-    "Submission Type",  
-    "Sponsor",  
-    "Indication / Use"  
-  ]);
+  xml += '<Row ss:Height="35">\n';  
+  xml += '  <Cell ss:StyleID="title" ss:MergeAcross="5">';  
+  xml += '<Data ss:Type="String">Approvals Grouped by Specialty</Data></Cell>\n';  
+  xml += '</Row>\n';
 
   for (var sk = 0; sk < specKeys.length; sk++) {  
-    var specName = specKeys[sk];  
-    var isFirst = true;
+    var specName = specKeys[sk];
 
-    for (var d2 = 0; d2 < approvals.length; d2++) {  
-      if (approvals[d2].specialty === specName) {  
-        specRows.push([  
-          isFirst ? specName : "",  
-          d2 + 1,  
-          approvals[d2].drug_name,  
-          approvals[d2].generic_name,  
-          approvals[d2].approval_date,  
-          approvals[d2].submission_type,  
-          approvals[d2].sponsor,  
-          approvals[d2].indication  
-        ]);  
-        isFirst = false;  
+    xml += '<Row ss:Height="28">\n';  
+    xml += '  <Cell ss:StyleID="specGroup" ss:MergeAcross="5">';  
+    xml += '<Data ss:Type="String">' +  
+      escapeXml(specName) + ' (' +  
+      specCounts[specName] + ')</Data></Cell>\n';  
+    xml += '</Row>\n';
+
+    xml += '<Row>\n';  
+    var specHeaders = [  
+      "Drug Name", "Generic Name", "Approval Date",  
+      "Submission Type", "Sponsor", "Indication"  
+    ];  
+    for (var sh = 0; sh < specHeaders.length; sh++) {  
+      xml += '  <Cell ss:StyleID="header">';  
+      xml += '<Data ss:Type="String">' +  
+        escapeXml(specHeaders[sh]) +  
+        '</Data></Cell>\n';  
+    }  
+    xml += '</Row>\n';
+
+    var rowCount = 0;  
+    for (var sd = 0; sd < approvals.length; sd++) {  
+      if (approvals[sd].specialty === specName) {  
+        var isAlt2 = rowCount % 2 === 1;  
+        var rs = isAlt2 ? "dataAlt" : "data";  
+        var ns = isAlt2 ? "drugNameAlt" : "drugName";
+
+        xml += '<Row>\n';  
+        xml += '  <Cell ss:StyleID="' + ns + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].drug_name) +  
+          '</Data></Cell>\n';  
+        xml += '  <Cell ss:StyleID="' + rs + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].generic_name) +  
+          '</Data></Cell>\n';  
+        xml += '  <Cell ss:StyleID="' + rs + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].approval_date) +  
+          '</Data></Cell>\n';  
+        xml += '  <Cell ss:StyleID="' + rs + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].submission_type) +  
+          '</Data></Cell>\n';  
+        xml += '  <Cell ss:StyleID="' + rs + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].sponsor) +  
+          '</Data></Cell>\n';  
+        xml += '  <Cell ss:StyleID="' + rs + '">';  
+        xml += '<Data ss:Type="String">' +  
+          escapeXml(approvals[sd].indication) +  
+          '</Data></Cell>\n';  
+        xml += '</Row>\n';  
+        rowCount++;  
       }  
     }
 
-    // Add blank row between specialties  
-    specRows.push([""]);  
+    xml += '<Row><Cell><Data ss:Type="String"></Data></Cell></Row>\n';  
   }
 
-  var wsSpec = XLSX.utils.aoa_to_sheet(specRows);  
-  wsSpec["!cols"] = [  
-    { wch: 22 },  
-    { wch: 4 },  
-    { wch: 22 },  
-    { wch: 28 },  
-    { wch: 14 },  
-    { wch: 20 },  
-    { wch: 25 },  
-    { wch: 60 }  
-  ];
+  xml += '</Table>\n</Worksheet>\n';
 
-  XLSX.utils.book_append_sheet(  
-    wb, wsSpec, "By Specialty"  
-  );
+  xml += '</Workbook>';
 
-  // =============================================  
-  // SHEET 4: NEW DRUG APPLICATIONS ONLY  
-  // =============================================  
-  var ndaRows = [];
-
-  ndaRows.push([  
-    "#",  
-    "Drug Name",  
-    "Generic Name",  
-    "Mapped Specialty",  
-    "Approval Date",  
-    "Sponsor",  
-    "Dosage Form",  
-    "Route",  
-    "Active Ingredients",  
-    "Indication / Use"  
-  ]);
-
-  var ndaCount = 0;  
-  for (var n = 0; n < approvals.length; n++) {  
-    if (approvals[n].submission_type ===  
-        "New Drug Application" ||  
-        approvals[n].submission_type ===  
-        "Abbreviated (Generic)") {  
-      ndaCount++;  
-      ndaRows.push([  
-        ndaCount,  
-        approvals[n].drug_name,  
-        approvals[n].generic_name,  
-        approvals[n].specialty,  
-        approvals[n].approval_date,  
-        approvals[n].sponsor,  
-        approvals[n].dosage_form,  
-        approvals[n].route,  
-        approvals[n].active_ingredients,  
-        approvals[n].indication  
-      ]);  
-    }  
-  }
-
-  if (ndaCount === 0) {  
-    ndaRows.push([  
-      "", "No new drug applications in this period",  
-      "", "", "", "", "", "", "", ""  
-    ]);  
-  }
-
-  var wsNDA = XLSX.utils.aoa_to_sheet(ndaRows);  
-  wsNDA["!cols"] = [  
-    { wch: 4 },  
-    { wch: 22 },  
-    { wch: 28 },  
-    { wch: 22 },  
-    { wch: 14 },  
-    { wch: 25 },  
-    { wch: 18 },  
-    { wch: 12 },  
-    { wch: 40 },  
-    { wch: 60 }  
-  ];
-
-  XLSX.utils.book_append_sheet(  
-    wb, wsNDA, "New Drugs Only"  
-  );
-
-  // =============================================  
-  // GENERATE FILE  
-  // =============================================  
-  var filename =  
+  // Download  
+  var blob = new Blob([xml], {  
+    type: "application/vnd.ms-excel"  
+  });  
+  var url = URL.createObjectURL(blob);  
+  var link = document.createElement("a");  
+  link.href = url;  
+  link.download =  
     "FDA_Drug_Approval_Report_" +  
-    fromDate + "_to_" + toDate + ".xlsx";
-
-  XLSX.writeFile(wb, filename);  
+    fromDate + "_to_" + toDate + ".xls";  
+  document.body.appendChild(link);  
+  link.click();  
+  document.body.removeChild(link);  
+  URL.revokeObjectURL(url);  
 }  
