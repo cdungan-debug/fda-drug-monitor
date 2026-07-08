@@ -621,6 +621,8 @@ function fetchAndDownload() {
           if (seen[key]) continue;  
           seen[key] = true;
 
+          if (appNum.toUpperCase().indexOf("ANDA") === 0) continue;
+
           var drugName = "Unknown";  
           var dosageForm = "Unknown";  
           var route = "Unknown";  
