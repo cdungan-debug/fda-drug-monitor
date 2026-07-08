@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Northwell FDA Drug Approval Monitor",
   "version": "1.1",
-  "description": "Download latest FDA drug approvals as a Maddie-style Excel report",
+  "description": "Download latest FDA drug approvals as an Excel report",
   "permissions": [
     "storage"
   ],
