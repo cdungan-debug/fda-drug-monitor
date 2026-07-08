@@ -559,236 +559,262 @@ function fetchAndDownload() {
 
   setStatus("loading", "Fetching FDA approvals...");
 
-  var url =  
-    "https://api.fda.gov/drug/drugsfda.json?" +  
-    "search=submissions.submission_status_date:" +  
-    "[" + fdaFrom + "+TO+" + fdaTo + "]" +  
-    "&limit=100";
+  var allResults = [];  
+  var skip = 0;  
+  var pageLimit = 100;
 
-  fetch(url)  
-    .then(function (response) {  
-      if (response.status === 404) {  
-        setStatus("error",  
-          "No approvals found for this date range.");  
-        btn.disabled = false;  
-        return null;  
-      }  
-      if (!response.ok) {  
-        throw new Error("FDA API error: " +  
-          response.status);  
-      }  
-      return response.json();  
-    })  
-    .then(function (data) {  
-      if (!data) return;
+  function fetchPage() {  
+    var url =  
+      "https://api.fda.gov/drug/drugsfda.json?" +  
+      "search=submissions.submission_status_date:" +  
+      "[" + fdaFrom + "+TO+" + fdaTo + "]" +  
+      "&limit=" + pageLimit +  
+      "&skip=" + skip;
 
-      var results = data.results || [];  
-      if (results.length === 0) {  
-        setStatus("error", "No drug records found.");  
-        btn.disabled = false;  
-        return;  
-      }
-
-      setStatus("loading",  
-        "Processing " + results.length +  
-        " drug record(s)...");
-
-      var approvals = [];  
-      var seen = {};
-
-      for (var i = 0; i < results.length; i++) {  
-        var drug = results[i];  
-        var submissions = drug.submissions || [];  
-        var products = drug.products || [];  
-        var openfda = drug.openfda || {};  
-        var appNum =  
-          drug.application_number || "Unknown";
-
-        for (var j = 0; j < submissions.length; j++) {  
-          var sub = submissions[j];  
-          var subDate =  
-            sub.submission_status_date || "";  
-          var subStatus =  
-            sub.submission_status || "";
-
-          if (!subDate || subStatus !== "AP") continue;
-
-          var subInt = parseInt(subDate);  
-          if (subInt < parseInt(fdaFrom) ||  
-              subInt > parseInt(fdaTo)) continue;
-
-          var key = appNum + "_" + subDate;  
-          if (seen[key]) continue;  
-          seen[key] = true;
-
-          if (appNum.toUpperCase().indexOf("ANDA") === 0) continue;
-
-          var drugName = "Unknown";  
-          var dosageForm = "Unknown";  
-          var route = "Unknown";  
-          var ingredients = "N/A";
-
-          if (products.length > 0) {  
-            drugName =  
-              products[0].brand_name || "Unknown";  
-            dosageForm =  
-              products[0].dosage_form || "Unknown";  
-            route = products[0].route || "Unknown";
-
-            var ais =  
-              products[0].active_ingredients || [];  
-            if (ais.length > 0) {  
-              var parts = [];  
-              for (var k = 0; k < ais.length; k++) {  
-                var aiName =  
-                  ais[k].name || "Unknown";  
-                var aiStr =  
-                  ais[k].strength || "";  
-                if (aiStr) {  
-                  parts.push(  
-                    aiName + " (" + aiStr + ")"  
-                  );  
-                } else {  
-                  parts.push(aiName);  
-                }  
-              }  
-              ingredients = parts.join("; ");  
-            }  
-          }
-
-          var genericName = "Unknown";  
-          var gNames = openfda.generic_name || [];  
-          if (gNames.length > 0) {  
-            genericName = gNames[0];  
-          }
-
-          var subType =  
-            sub.submission_type || "Unknown";  
-          var subTypeDesc = subType;  
-          if (subType === "ORIG") {  
-            subTypeDesc = "New Drug Application";  
-          } else if (subType === "SUPPL") {  
-            subTypeDesc = "Supplemental";  
-          } else if (subType === "ABBR") {  
-            subTypeDesc = "Abbreviated (Generic)";  
-          }
-
-          var dateDisplay = subDate;  
-          if (subDate.length === 8) {  
-            dateDisplay =  
-              subDate.substring(4, 6) + "/" +  
-              subDate.substring(6, 8) + "/" +  
-              subDate.substring(0, 4);  
-          }
-
-          approvals.push({  
-            drug_name: drugName,  
-            generic_name: genericName,  
-            approval_date: dateDisplay,  
-            approval_date_raw: subDate,  
-            application_number: appNum,  
-            submission_type: subTypeDesc,  
-            sponsor:  
-              drug.sponsor_name || "Unknown",  
-            dosage_form: dosageForm,  
-            route: route,  
-            active_ingredients: ingredients,  
-            indication: "",  
-            pharmClass: "",  
-            specialty: ""  
-          });  
+    return fetch(url)  
+      .then(function (response) {  
+        if (response.status === 404) {  
+          return null;  
         }  
-      }
-
-      if (approvals.length === 0) {  
-        setStatus("error",  
-          "No approved drugs found in range.");  
-        btn.disabled = false;  
-        return;  
-      }
-
-      setStatus("loading",  
-        "Fetching indications for " +  
-        approvals.length + " drug(s)...");
-
-      var fetchedApps = {};  
-      for (var a = 0; a < approvals.length; a++) {  
-        var thisApp =  
-          approvals[a].application_number;  
-        if (!fetchedApps[thisApp]) {  
-          fetchedApps[thisApp] =  
-            fetchIndication(thisApp);  
+        if (!response.ok) {  
+          throw new Error("FDA API error: " +  
+            response.status);  
         }  
-      }
+        return response.json();  
+      })  
+      .then(function (data) {  
+        if (!data) return false;
 
-      var appKeys = Object.keys(fetchedApps);  
-      Promise.all(  
-        appKeys.map(function (k) {  
-          return fetchedApps[k];  
-        })  
-      ).then(function (indResults) {  
-        var indMap = {};  
-        for (var x = 0; x < appKeys.length; x++) {  
-          indMap[appKeys[x]] = indResults[x];  
-        }
+        var results = data.results || [];  
+        if (results.length === 0) return false;
 
-        for (var b = 0; b < approvals.length; b++) {  
-          var result =  
-            indMap[approvals[b].application_number]  
-            || { indication: "N/A", pharmClass: "" };  
-          approvals[b].indication = result.indication;  
-          approvals[b].pharmClass = result.pharmClass;  
-        }
+        allResults = allResults.concat(results);  
+        var totalAvailable =  
+          data.meta.results.total || 0;
 
         setStatus("loading",  
-          "Looking up drug classifications via NIH RxClass...");
+          "Fetching FDA data... " +  
+          allResults.length + " of " +  
+          totalAvailable + " records");
 
-        var rxPromises = [];  
-        var rxIndexes = [];
+        skip += pageLimit;  
+        if (skip < totalAvailable && skip < 1000) {  
+          return fetchPage();  
+        }  
+        return true;  
+      });  
+  }
 
-        for (var c = 0; c < approvals.length; c++) {  
-          if (approvals[c].pharmClass === "" &&  
-              approvals[c].indication === "N/A") {  
-            var lookupName =  
-              approvals[c].generic_name !== "Unknown"  
-                ? approvals[c].generic_name  
-                : approvals[c].drug_name;  
-            rxPromises.push(  
-              fetchRxClassByName(lookupName)  
-            );  
-            rxIndexes.push(c);  
-          }  
-        }
+  fetchPage().then(function (success) {  
+    if (!success && allResults.length === 0) {  
+      setStatus("error",  
+        "No approvals found for this date range.");  
+      btn.disabled = false;  
+      return;  
+    }
 
-        if (rxPromises.length === 0) {  
-          finishReport(approvals, fromDate, toDate, btn);  
-          return;  
-        }
+    var results = allResults;
 
-        Promise.all(rxPromises).then(  
-          function (rxResults) {  
-            for (var r = 0; r < rxResults.length; r++) {  
-              var idx = rxIndexes[r];  
-              if (rxResults[r]) {  
-                approvals[idx].pharmClass =  
-                  rxResults[r];  
-                if (approvals[idx].indication === "N/A") {  
-                  approvals[idx].indication =  
-                    "RxClass: " + rxResults[r];  
-                }  
+    setStatus("loading",  
+      "Processing " + results.length +  
+      " drug record(s)...");
+
+    var approvals = [];  
+    var seen = {};
+
+    for (var i = 0; i < results.length; i++) {  
+      var drug = results[i];  
+      var submissions = drug.submissions || [];  
+      var products = drug.products || [];  
+      var openfda = drug.openfda || {};  
+      var appNum =  
+        drug.application_number || "Unknown";
+
+      for (var j = 0; j < submissions.length; j++) {  
+        var sub = submissions[j];  
+        var subDate =  
+          sub.submission_status_date || "";  
+        var subStatus =  
+          sub.submission_status || "";
+
+        if (!subDate || subStatus !== "AP") continue;
+
+        var subInt = parseInt(subDate);  
+        if (subInt < parseInt(fdaFrom) ||  
+            subInt > parseInt(fdaTo)) continue;
+
+        var key = appNum + "_" + subDate;  
+        if (seen[key]) continue;  
+        seen[key] = true;
+
+        if (appNum.toUpperCase().indexOf("ANDA") === 0) continue;
+
+        var drugName = "Unknown";  
+        var dosageForm = "Unknown";  
+        var route = "Unknown";  
+        var ingredients = "N/A";
+
+        if (products.length > 0) {  
+          drugName =  
+            products[0].brand_name || "Unknown";  
+          dosageForm =  
+            products[0].dosage_form || "Unknown";  
+          route = products[0].route || "Unknown";
+
+          var ais =  
+            products[0].active_ingredients || [];  
+          if (ais.length > 0) {  
+            var parts = [];  
+            for (var k = 0; k < ais.length; k++) {  
+              var aiName =  
+                ais[k].name || "Unknown";  
+              var aiStr =  
+                ais[k].strength || "";  
+              if (aiStr) {  
+                parts.push(  
+                  aiName + " (" + aiStr + ")"  
+                );  
+              } else {  
+                parts.push(aiName);  
               }  
             }  
-            finishReport(  
-              approvals, fromDate, toDate, btn  
-            );  
+            ingredients = parts.join("; ");  
           }  
-        );  
-      });  
-    })  
-    .catch(function (err) {  
-      setStatus("error", "Error: " + err.message);  
+        }
+
+        var genericName = "Unknown";  
+        var gNames = openfda.generic_name || [];  
+        if (gNames.length > 0) {  
+          genericName = gNames[0];  
+        }
+
+        var subType =  
+          sub.submission_type || "Unknown";  
+        var subTypeDesc = subType;  
+        if (subType === "ORIG") {  
+          subTypeDesc = "New Drug Application";  
+        } else if (subType === "SUPPL") {  
+          subTypeDesc = "Supplemental";  
+        } else if (subType === "ABBR") {  
+          subTypeDesc = "Abbreviated (Generic)";  
+        }
+
+        var dateDisplay = subDate;  
+        if (subDate.length === 8) {  
+          dateDisplay =  
+            subDate.substring(4, 6) + "/" +  
+            subDate.substring(6, 8) + "/" +  
+            subDate.substring(0, 4);  
+        }
+
+        approvals.push({  
+          drug_name: drugName,  
+          generic_name: genericName,  
+          approval_date: dateDisplay,  
+          approval_date_raw: subDate,  
+          application_number: appNum,  
+          submission_type: subTypeDesc,  
+          sponsor:  
+            drug.sponsor_name || "Unknown",  
+          dosage_form: dosageForm,  
+          route: route,  
+          active_ingredients: ingredients,  
+          indication: "",  
+          pharmClass: "",  
+          specialty: ""  
+        });  
+      }  
+    }
+
+    if (approvals.length === 0) {  
+      setStatus("error",  
+        "No approved drugs found in range.");  
       btn.disabled = false;  
+      return;  
+    }
+
+    setStatus("loading",  
+      "Fetching indications for " +  
+      approvals.length + " drug(s)...");
+
+    var fetchedApps = {};  
+    for (var a = 0; a < approvals.length; a++) {  
+      var thisApp =  
+        approvals[a].application_number;  
+      if (!fetchedApps[thisApp]) {  
+        fetchedApps[thisApp] =  
+          fetchIndication(thisApp);  
+      }  
+    }
+
+    var appKeys = Object.keys(fetchedApps);  
+    Promise.all(  
+      appKeys.map(function (k) {  
+        return fetchedApps[k];  
+      })  
+    ).then(function (indResults) {  
+      var indMap = {};  
+      for (var x = 0; x < appKeys.length; x++) {  
+        indMap[appKeys[x]] = indResults[x];  
+      }
+
+      for (var b = 0; b < approvals.length; b++) {  
+        var result =  
+          indMap[approvals[b].application_number]  
+          || { indication: "N/A", pharmClass: "" };  
+        approvals[b].indication = result.indication;  
+        approvals[b].pharmClass = result.pharmClass;  
+      }
+
+      setStatus("loading",  
+        "Looking up drug classifications via NIH RxClass...");
+
+      var rxPromises = [];  
+      var rxIndexes = [];
+
+      for (var c = 0; c < approvals.length; c++) {  
+        if (approvals[c].pharmClass === "" &&  
+            approvals[c].indication === "N/A") {  
+          var lookupName =  
+            approvals[c].generic_name !== "Unknown"  
+              ? approvals[c].generic_name  
+              : approvals[c].drug_name;  
+          rxPromises.push(  
+            fetchRxClassByName(lookupName)  
+          );  
+          rxIndexes.push(c);  
+        }  
+      }
+
+      if (rxPromises.length === 0) {  
+        finishReport(approvals, fromDate, toDate, btn);  
+        return;  
+      }
+
+      Promise.all(rxPromises).then(  
+        function (rxResults) {  
+          for (var r = 0; r < rxResults.length; r++) {  
+            var idx = rxIndexes[r];  
+            if (rxResults[r]) {  
+              approvals[idx].pharmClass =  
+                rxResults[r];  
+              if (approvals[idx].indication === "N/A") {  
+                approvals[idx].indication =  
+                  "RxClass: " + rxResults[r];  
+              }  
+            }  
+          }  
+          finishReport(  
+            approvals, fromDate, toDate, btn  
+          );  
+        }  
+      );  
     });  
+  })  
+  .catch(function (err) {  
+    setStatus("error", "Error: " + err.message);  
+    btn.disabled = false;  
+  });  
 }
 
 
