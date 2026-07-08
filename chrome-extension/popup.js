@@ -161,7 +161,7 @@ function getSubmissionClassification(sub) {
   return code;
 }
 
-function shouldIncludeForMaddie(sub) {
+function shouldIncludeForFDAReport(sub) {
   var code = cleanText(sub.submission_class_code);
   var desc = cleanText(sub.submission_class_code_description);
   var classification = getSubmissionClassification(sub);
@@ -758,7 +758,7 @@ function fetchAndDownload() {
             continue;
           }
 
-          if (!shouldIncludeForMaddie(sub)) {
+          if (!shouldIncludeForFDAReport(sub)) {
             continue;
           }
 
@@ -811,26 +811,6 @@ function fetchAndDownload() {
 
           var route = simplifyRoute(rawRoute, dosageForm);
 
-          var activeIngredients = "N/A";
-          var ais = product.active_ingredients || [];
-
-          if (ais.length > 0) {
-            var parts = [];
-
-            for (var k = 0; k < ais.length; k++) {
-              var aiName = ais[k].name || "Unknown";
-              var aiStr = ais[k].strength || "";
-
-              if (aiStr) {
-                parts.push(aiName + " (" + aiStr + ")");
-              } else {
-                parts.push(aiName);
-              }
-            }
-
-            activeIngredients = parts.join("; ");
-          }
-
           approvals.push({
             manufacturer: normalizeManufacturer(drug.sponsor_name || "Unknown"),
             drug_name: buildDrugDisplayName(brandName, genericName),
@@ -847,8 +827,7 @@ function fetchAndDownload() {
             application_number: appNum,
             approval_date_raw: subDate,
             sponsor: drug.sponsor_name || "Unknown",
-            dosage_form: dosageForm,
-            active_ingredients: activeIngredients
+            dosage_form: dosageForm
           });
         }
       }
@@ -856,7 +835,7 @@ function fetchAndDownload() {
       if (approvals.length === 0) {
         setStatus(
           "error",
-          "No Maddie-style approvals found. The range may not contain Efficacy, Type, or blank/null classifications."
+          "No qualifying FDA approvals found. The range may not contain Efficacy, Type, or blank/null classifications."
         );
 
         btn.disabled = false;
@@ -900,13 +879,13 @@ function fetchAndDownload() {
             return a.drug_name.localeCompare(b.drug_name);
           });
 
-          setStatus("loading", "Generating Maddie-style Excel report...");
+          setStatus("loading", "Generating FDA Excel report...");
 
-          generateMaddieExcel(approvals, fromDate, toDate);
+          generateFDAExcel(approvals, fromDate, toDate);
 
           setStatus(
             "success",
-            "Downloaded " + approvals.length + " Maddie-style approval(s)."
+            "Downloaded " + approvals.length + " FDA approval(s)."
           );
 
           btn.disabled = false;
@@ -936,7 +915,7 @@ function fetchAndDownload() {
     });
 }
 
-function generateMaddieExcel(approvals, fromDate, toDate) {
+function generateFDAExcel(approvals, fromDate, toDate) {
   var xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
   xml += '<?mso-application progid="Excel.Sheet"?>\n';
   xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';
@@ -1008,7 +987,6 @@ function generateMaddieExcel(approvals, fromDate, toDate) {
   xml += '</Styles>\n';
 
   xml += '<Worksheet ss:Name="FDA Approvals">\n';
-
   xml += '<Table ss:DefaultRowHeight="18">\n';
 
   xml += '<Column ss:Width="150"/>\n';
@@ -1100,7 +1078,7 @@ function generateMaddieExcel(approvals, fromDate, toDate) {
   xml += '</Row>\n';
 
   var notes = [
-    ["Report Type", "Maddie-style FDA approval report"],
+    ["Report Type", "FDA Drug Approval Report"],
     ["Date Range", formatDateDisplay(fromDate) + " to " + formatDateDisplay(toDate)],
     ["Total Included Rows", String(approvals.length)],
     ["Primary Source", "openFDA Drugs@FDA endpoint"],
@@ -1135,7 +1113,7 @@ function generateMaddieExcel(approvals, fromDate, toDate) {
 
   link.href = url;
   link.download =
-    "FDA_Maddie_Approval_Report_" +
+    "FDA_Drug_Approval_Report_" +
     fromDate +
     "_to_" +
     toDate +
