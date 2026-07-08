@@ -647,7 +647,43 @@ function fetchAndDownload() {
         if (seen[key]) continue;  
         seen[key] = true;
 
+        // Filter out ANDAs (generic drug applications)  
         if (appNum.toUpperCase().indexOf("ANDA") === 0) continue;
+
+        var subType =  
+          sub.submission_type || "Unknown";
+
+        // Filter out minor supplementals  
+        var subClassCode =  
+          sub.submission_class_code || "";  
+        var subClassDesc =  
+          sub.submission_class_code_description || "";  
+        var combinedClass =  
+          (subClassCode + " " + subClassDesc).toUpperCase();
+
+        if (subType === "SUPPL") {  
+          var isMinor = false;  
+          var minorKeywords = [  
+            "MANUF", "PACKAGING", "EDITORIAL",  
+            "CBE", "ANNUAL REPORT", "STABILITY",  
+            "PROCESS", "SITE CHANGE", "SUPPLIER",  
+            "CONTAINER", "SPECIFICATION",  
+            "EXPIRATION", "IMPURITY", "METHOD",  
+            "DISSOLUTION", "BIOEQUIV",  
+            "PATENT", "EXCLUSIVITY",  
+            "LABELING-REVISION",  
+            "LABELING-OTHER",  
+            "CHEMISTRY",  
+            "CMC"  
+          ];  
+          for (var mk = 0; mk < minorKeywords.length; mk++) {  
+            if (combinedClass.indexOf(minorKeywords[mk]) !== -1) {  
+              isMinor = true;  
+              break;  
+            }  
+          }  
+          if (isMinor) continue;  
+        }
 
         var drugName = "Unknown";  
         var dosageForm = "Unknown";  
@@ -688,8 +724,6 @@ function fetchAndDownload() {
           genericName = gNames[0];  
         }
 
-        var subType =  
-          sub.submission_type || "Unknown";  
         var subTypeDesc = subType;  
         if (subType === "ORIG") {  
           subTypeDesc = "New Drug Application";  
@@ -697,6 +731,11 @@ function fetchAndDownload() {
           subTypeDesc = "Supplemental";  
         } else if (subType === "ABBR") {  
           subTypeDesc = "Abbreviated (Generic)";  
+        }
+
+        // Add submission classification detail  
+        if (subClassDesc) {  
+          subTypeDesc = subTypeDesc + " - " + subClassDesc;  
         }
 
         var dateDisplay = subDate;  
@@ -1111,7 +1150,7 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '<Column ss:Width="180"/>\n';  
   xml += '<Column ss:Width="130"/>\n';  
   xml += '<Column ss:Width="90"/>\n';  
-  xml += '<Column ss:Width="140"/>\n';  
+  xml += '<Column ss:Width="200"/>\n';  
   xml += '<Column ss:Width="170"/>\n';  
   xml += '<Column ss:Width="110"/>\n';  
   xml += '<Column ss:Width="120"/>\n';  
@@ -1206,7 +1245,7 @@ function generateFormattedExcel(approvals, fromDate,
   xml += '<Column ss:Width="150"/>\n';  
   xml += '<Column ss:Width="180"/>\n';  
   xml += '<Column ss:Width="90"/>\n';  
-  xml += '<Column ss:Width="140"/>\n';  
+  xml += '<Column ss:Width="200"/>\n';  
   xml += '<Column ss:Width="170"/>\n';  
   xml += '<Column ss:Width="400"/>\n';
 
